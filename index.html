@@ -3093,6 +3093,15 @@ function pullFromServer(pendingOutbox){
     localStorage.setItem(SK,JSON.stringify(D));
     _lastSyncTime=new Date(); setSyncState('online'); _syncCountdown=_autoSyncSeconds;
     updateDraftsBadge();
+    // Duty-draft badge/modal were never refreshed on a pulled sync (only
+    // updateDraftsBadge(), the PATROL drafts badge, was called here) — so a
+    // duty draft saved on one device correctly synced into D.dutyDrafts on
+    // another device, but its badge count stayed at 0 and, if the Duty
+    // Drafts modal happened to be open, its list stayed stale until the
+    // modal was manually closed and reopened. Refresh both on every pull.
+    updateDutyDraftsBadge();
+    var _dutyDraftsModalEl=document.getElementById('duty-drafts-modal');
+    if(_dutyDraftsModalEl&&_dutyDraftsModalEl.classList.contains('open')) renderDutyDraftsList();
     try {
       var active=document.querySelector('.section.active');
       if(active){var aid=active.id;
@@ -4818,7 +4827,7 @@ function dsAssignFemalePreferredGroups(date,slots,used,warnings){
     if(t.trade==='Signal') return false;
     if(t.trade==='Driver') return false;
     if(isAdminTrade(t)) return false;
-    var c=dutyConflict(t.id,date,startTime,dur,null,_editingDutyDraftId);
+    var c=dutyConflict(t.id,date,startTime,dur,null,_editingDutyDraftId,_dsPeriod);
     if(c.duty||c.patrol||c.draftDuty) return false;
     return true;
   }
@@ -4833,7 +4842,7 @@ function dsAssignFemalePreferredGroups(date,slots,used,warnings){
       if(t.trade==='Signal') return false;
       if(t.trade==='Driver') return false;
       if(isAdminTrade(t)&&!allowAdmin) return false;
-      var c=dutyConflict(t.id,date,startTime,dur,null,_editingDutyDraftId);
+      var c=dutyConflict(t.id,date,startTime,dur,null,_editingDutyDraftId,_dsPeriod);
       if(c.duty||c.patrol||c.draftDuty) return false;
       return true;
     }
@@ -4959,7 +4968,7 @@ function dsAssignDriverQuota(date,slots,used,warnings){
         if(!slot.roamingRole&&!isRoamingEligible(t)) return false;
       }
       if(post&&post.qualRequired&&!isDutyQualified(t,post.qualRequired)) return false;
-      var c=dutyConflict(t.id,date,slot.startTime,slot.durationHours,null,_editingDutyDraftId);
+      var c=dutyConflict(t.id,date,slot.startTime,slot.durationHours,null,_editingDutyDraftId,_dsPeriod);
       if(c.duty||c.patrol||c.draftDuty) return false;
       return true;
     });
@@ -5056,7 +5065,7 @@ function dsFillPass(date,slotList,used,warnings,allowSgtFallback){
         // Medical/Signal posts are role-locked — only troops whose profile
         // Role matches are ever eligible, no fallback.
         if(roleLocked&&!troopMeetsPostRequirement(t,post)) return false;
-        var c=dutyConflict(t.id,date,slot.startTime,slot.durationHours,null,_editingDutyDraftId);
+        var c=dutyConflict(t.id,date,slot.startTime,slot.durationHours,null,_editingDutyDraftId,_dsPeriod);
         if(c.duty||c.patrol||c.draftDuty) return false;
         return true;
       });
@@ -5136,7 +5145,7 @@ function dsFillPass(date,slotList,used,warnings,allowSgtFallback){
         if(!isAvailable(t)) return false;
         if(used.indexOf(t.id)>=0) return false;
         if(isContingencyExcluded(t.id,date,isDayTime(slot.startTime)?'day':'night')) return false;
-        var c=dutyConflict(t.id,date,slot.startTime,slot.durationHours,null,_editingDutyDraftId);
+        var c=dutyConflict(t.id,date,slot.startTime,slot.durationHours,null,_editingDutyDraftId,_dsPeriod);
         if(c.duty||c.patrol||c.draftDuty) return false;
         return true;
       });
@@ -5226,8 +5235,12 @@ function generateDutySuggestion(){
   if(!date){ showAlert('ds-config-alert','Enter a valid date (DD/MM/YYYY).','danger'); return; }
   var slots=dsBuildSlots(period);
   if(slots.length===0){ showAlert('ds-config-alert','Nothing to suggest — check Duty Settings has active posts'+(period==='night'?', Roaming, and Line Duty types.':'.') ,'danger'); return; }
+  // Set before dsFillSlots runs (not after, as before) so its dutyConflict
+  // checks can read _dsPeriod and correctly roll post-midnight slots onto
+  // their own true occurrence date rather than colliding with last night's.
+  _dsDate=date; _dsPeriod=period;
   var warnings=dsFillSlots(date,slots);
-  _dsDate=date; _dsPeriod=period; _dsSlots=slots; _dsWarnings=warnings;
+  _dsSlots=slots; _dsWarnings=warnings;
   renderDsResults();
   document.getElementById('ds-config').style.display='none';
   document.getElementById('ds-results').style.display='';
@@ -5336,22 +5349,15 @@ function dsManualSearch(i,val){
   var slot=_dsSlots[i];
   var usedElsewhere={};
   _dsSlots.forEach(function(s,idx){ if(idx!==i&&s.chosenId) usedElsewhere[s.chosenId]=true; });
-  // Manual search deliberately does NOT hard-block on dutyConflict (duty/
-  // patrol/draftDuty) the way the automatic suggestion pool does. Manual
-  // entry exists precisely for exceptional cases the automatic rotation
-  // logic can't judge — e.g. a shift-count/duration change reslicing the
-  // same night into different boundaries, which makes a troop's earlier
-  // slice of that same night look like a clock-time "overlap" against the
-  // new slice. The person typing a name here is knowingly overriding, so
-  // we surface the conflict as a visible warning tag (same pattern as the
-  // eligibility/repeat-rotation flags below) instead of hiding the troop
-  // entirely with no way to pick them. Contingency Mode stays a hard block
-  // since it's a separate, intentional exclusion (not a rotation/overlap
-  // judgment call) and every other candidate list in this tool treats it
-  // the same way.
   var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){
     if(usedElsewhere[t.id]) return false;
     if((t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)<0) return false;
+    var c=dutyConflict(t.id,_dsDate,slot.startTime,slot.durationHours,null,_editingDutyDraftId,_dsPeriod);
+    if(c.duty||c.patrol||c.draftDuty) return false;
+    // Contingency Mode is a hard block everywhere else this slot's
+    // candidates are computed (dsFillPass, dsAssignDriverQuota,
+    // sgtFallback) — manual search must agree, not just show it as a
+    // soft warning tag below.
     if(isContingencyExcluded(t.id,_dsDate,isDayTime(slot.startTime)?'day':'night')) return false;
     return true;
   });
@@ -5359,12 +5365,9 @@ function dsManualSearch(i,val){
   box.style.display='block';
   var post=slot.postId?dutyPostById(slot.postId):null;
   box.innerHTML=matches.slice(0,8).map(function(t){
-    var c=dutyConflict(t.id,_dsDate,slot.startTime,slot.durationHours,null,_editingDutyDraftId);
-    var conflictWarn=c.duty?'Already on another duty at this time':(c.draftDuty?'Reserved by another duty draft at this time':(c.patrol?'On an active/ongoing patrol':null));
     var issues=dutyEligibilityIssuesRaw(t,post,slot);
     var repeatWarn=dutyRecentRepeatWarning(t.id,_dsDate,slot.startTime,slot.postName);
-    var warnText=conflictWarn||(issues.length?issues[0]:repeatWarn);
-    var flag=warnText?' <span style="color:var(--orange);font-size:10px;">⚠ '+escHtml(warnText)+'</span>':'';
+    var flag=issues.length?' <span style="color:var(--orange);font-size:10px;">⚠ '+escHtml(issues[0])+'</span>':(repeatWarn?' <span style="color:var(--orange);font-size:10px;">⚠ '+escHtml(repeatWarn)+'</span>':'');
     return '<div class="suggest-item" onclick="dsManualPick('+i+',\''+t.id+'\')"><strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong> <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span>'+flag+'</div>';
   }).join('');
 }
@@ -5566,7 +5569,7 @@ function editDutyDraft(id){
       }
       if(s.category!=='Roaming'&&isRoamingOnlyRank(t)) return false;
       if(s.category==='Sentry'&&isNCE(t)) return false;
-      var c=dutyConflict(t.id,_dsDate,s.startTime,s.durationHours,null,_editingDutyDraftId);
+      var c=dutyConflict(t.id,_dsDate,s.startTime,s.durationHours,null,_editingDutyDraftId,_dsPeriod);
       if(c.duty||c.patrol||c.draftDuty) return false;
       return true;
     });
@@ -6871,35 +6874,45 @@ function shiftsOverlap(aStart,aDur,bStart,bDur){
   return ra[0]<rb[1] && rb[0]<ra[1];
 }
 // A troop is in conflict for a given date+start+duration if they're already
-// on another duty that TRULY overlaps in real elapsed time, or already
-// logged on a patrol that day (patrols don't record exact times, so any
-// same-day patrol counts as a soft conflict).
-//
-// `date` here is always the LOGICAL/base date (same convention as every
-// caller — the real save-time conversion happens via
-// dutyRecordCalendarDate), so it must be converted to a real calendar
-// date before comparing against d.date (which is already real). This
-// matters most for shifts that start after midnight: a post-midnight
-// tail shift is real-date-stamped onto the NEXT calendar day, so without
-// this conversion a candidate slot and an unrelated shift from a
-// DIFFERENT night can land on the same real date string and the same
-// time-of-day (e.g. after a shift-duration change moves clock times
-// around) and get wrongly flagged as a same-night double-booking even
-// though they're genuinely ~24h apart. Comparing true start/end instants
-// (via dutyStartMoment/dutyEndMoment) rather than date-string equality +
-// time-of-day overlap fixes that without changing same-day behavior.
-function dutyConflict(tid,date,startStr,durHours,excludeDutyId,excludeDutyDraftId){
-  var candRealDate=date?dutyRecordCalendarDate(date,startStr,isDayTime(startStr)?'day':'night'):date;
-  var candStart=candRealDate?new Date(candRealDate+'T'+(startStr||'00:00')+':00'):null;
-  var candEnd=candStart?new Date(candStart.getTime()+Math.round((parseFloat(durHours)||0)*60)*60000):null;
-  var duty=D.duties.some(function(d){
-    if(d.cancelled) return false;
-    if(d.id===excludeDutyId) return false;
-    if((d.troops||[]).indexOf(tid)<0) return false;
-    if(!candStart) return false;
-    var dStart=dutyStartMoment(d), dEnd=dutyEndMoment(d);
-    return candStart<dEnd && dStart<candEnd;
-  });
+// on another duty that overlaps in time that same day, or already logged on
+// a patrol that day (patrols don't record exact times, so any same-day
+// patrol counts as a soft conflict).
+// period (optional): when the caller knows which roster this candidate
+// slot belongs to ('day' or 'night'), the slot's TRUE real-calendar
+// occurrence date is computed via dutyRecordCalendarDate (the same
+// rollover already used everywhere duties are actually logged/reserved)
+// and the conflict check compares real overlapping time windows instead
+// of a raw date-string match. Without this, a night roster's post-
+// midnight slots (typed/base date X) were checked against d.date===X —
+// but a PREVIOUS night's post-midnight tail (typed/base date X-1) is
+// ALSO stamped d.date===X (it rolls forward), so the two nights' tails
+// collided and wrongly blocked a troop from tonight's slot just because
+// someone was on an identically-timed tail shift the night before, even
+// though the two are ~24h apart in real time. Callers that don't pass
+// period keep the exact original date-string behavior (their `date` is
+// already the shift's own real calendar date, not a roster base date).
+function dutyConflict(tid,date,startStr,durHours,excludeDutyId,excludeDutyDraftId,period){
+  var duty;
+  if(period){
+    var realDate=dutyRecordCalendarDate(date,startStr,period);
+    var candStart=dutyStartMoment({date:realDate,startTime:startStr});
+    var candEnd=dutyEndMoment({date:realDate,startTime:startStr,durationHours:durHours});
+    duty=D.duties.some(function(d){
+      if(d.cancelled) return false;
+      if(d.id===excludeDutyId) return false;
+      if((d.troops||[]).indexOf(tid)<0) return false;
+      var dStart=dutyStartMoment(d), dEnd=dutyEndMoment(d);
+      return dStart<candEnd && candStart<dEnd;
+    });
+  } else {
+    duty=D.duties.some(function(d){
+      if(d.cancelled) return false;
+      if(d.id===excludeDutyId) return false;
+      if(d.date!==date) return false;
+      if((d.troops||[]).indexOf(tid)<0) return false;
+      return shiftsOverlap(d.startTime,d.durationHours,startStr,durHours);
+    });
+  }
   // A saved DUTY DRAFT reserves its troops only for the real window of the
   // shift(s) it actually covers — the same time/shift-aware reservation
   // logic used everywhere else (isTroopReserved / dutyDraftReservedTroopIds),
