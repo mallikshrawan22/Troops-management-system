@@ -2507,7 +2507,7 @@ body.light-mode ::-webkit-scrollbar-thumb{background:#a8c4ad;}
 // =====================================================================
 // DATA & CONSTANTS
 // =====================================================================
-var API_URL = 'https://troops-management-system.onrender.com';
+var API_URL = 'https://pob-tracker-api.onrender.com';
 // Shared secret that must match the API_KEY environment variable set on the
 // Render backend. This blocks casual/automated discovery of the API (search
 // crawlers, random scans of *.onrender.com, a leaked link) — anyone without
@@ -6861,16 +6861,34 @@ function shiftsOverlap(aStart,aDur,bStart,bDur){
   return ra[0]<rb[1] && rb[0]<ra[1];
 }
 // A troop is in conflict for a given date+start+duration if they're already
-// on another duty that overlaps in time that same day, or already logged on
-// a patrol that day (patrols don't record exact times, so any same-day
-// patrol counts as a soft conflict).
+// on another duty that TRULY overlaps in real elapsed time, or already
+// logged on a patrol that day (patrols don't record exact times, so any
+// same-day patrol counts as a soft conflict).
+//
+// `date` here is always the LOGICAL/base date (same convention as every
+// caller — the real save-time conversion happens via
+// dutyRecordCalendarDate), so it must be converted to a real calendar
+// date before comparing against d.date (which is already real). This
+// matters most for shifts that start after midnight: a post-midnight
+// tail shift is real-date-stamped onto the NEXT calendar day, so without
+// this conversion a candidate slot and an unrelated shift from a
+// DIFFERENT night can land on the same real date string and the same
+// time-of-day (e.g. after a shift-duration change moves clock times
+// around) and get wrongly flagged as a same-night double-booking even
+// though they're genuinely ~24h apart. Comparing true start/end instants
+// (via dutyStartMoment/dutyEndMoment) rather than date-string equality +
+// time-of-day overlap fixes that without changing same-day behavior.
 function dutyConflict(tid,date,startStr,durHours,excludeDutyId,excludeDutyDraftId){
+  var candRealDate=date?dutyRecordCalendarDate(date,startStr,isDayTime(startStr)?'day':'night'):date;
+  var candStart=candRealDate?new Date(candRealDate+'T'+(startStr||'00:00')+':00'):null;
+  var candEnd=candStart?new Date(candStart.getTime()+Math.round((parseFloat(durHours)||0)*60)*60000):null;
   var duty=D.duties.some(function(d){
     if(d.cancelled) return false;
     if(d.id===excludeDutyId) return false;
-    if(d.date!==date) return false;
     if((d.troops||[]).indexOf(tid)<0) return false;
-    return shiftsOverlap(d.startTime,d.durationHours,startStr,durHours);
+    if(!candStart) return false;
+    var dStart=dutyStartMoment(d), dEnd=dutyEndMoment(d);
+    return candStart<dEnd && dStart<candEnd;
   });
   // A saved DUTY DRAFT reserves its troops only for the real window of the
   // shift(s) it actually covers — the same time/shift-aware reservation
