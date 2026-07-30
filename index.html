@@ -5336,15 +5336,22 @@ function dsManualSearch(i,val){
   var slot=_dsSlots[i];
   var usedElsewhere={};
   _dsSlots.forEach(function(s,idx){ if(idx!==i&&s.chosenId) usedElsewhere[s.chosenId]=true; });
+  // Manual search deliberately does NOT hard-block on dutyConflict (duty/
+  // patrol/draftDuty) the way the automatic suggestion pool does. Manual
+  // entry exists precisely for exceptional cases the automatic rotation
+  // logic can't judge — e.g. a shift-count/duration change reslicing the
+  // same night into different boundaries, which makes a troop's earlier
+  // slice of that same night look like a clock-time "overlap" against the
+  // new slice. The person typing a name here is knowingly overriding, so
+  // we surface the conflict as a visible warning tag (same pattern as the
+  // eligibility/repeat-rotation flags below) instead of hiding the troop
+  // entirely with no way to pick them. Contingency Mode stays a hard block
+  // since it's a separate, intentional exclusion (not a rotation/overlap
+  // judgment call) and every other candidate list in this tool treats it
+  // the same way.
   var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){
     if(usedElsewhere[t.id]) return false;
     if((t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)<0) return false;
-    var c=dutyConflict(t.id,_dsDate,slot.startTime,slot.durationHours,null,_editingDutyDraftId);
-    if(c.duty||c.patrol||c.draftDuty) return false;
-    // Contingency Mode is a hard block everywhere else this slot's
-    // candidates are computed (dsFillPass, dsAssignDriverQuota,
-    // sgtFallback) — manual search must agree, not just show it as a
-    // soft warning tag below.
     if(isContingencyExcluded(t.id,_dsDate,isDayTime(slot.startTime)?'day':'night')) return false;
     return true;
   });
@@ -5352,9 +5359,12 @@ function dsManualSearch(i,val){
   box.style.display='block';
   var post=slot.postId?dutyPostById(slot.postId):null;
   box.innerHTML=matches.slice(0,8).map(function(t){
+    var c=dutyConflict(t.id,_dsDate,slot.startTime,slot.durationHours,null,_editingDutyDraftId);
+    var conflictWarn=c.duty?'Already on another duty at this time':(c.draftDuty?'Reserved by another duty draft at this time':(c.patrol?'On an active/ongoing patrol':null));
     var issues=dutyEligibilityIssuesRaw(t,post,slot);
     var repeatWarn=dutyRecentRepeatWarning(t.id,_dsDate,slot.startTime,slot.postName);
-    var flag=issues.length?' <span style="color:var(--orange);font-size:10px;">⚠ '+escHtml(issues[0])+'</span>':(repeatWarn?' <span style="color:var(--orange);font-size:10px;">⚠ '+escHtml(repeatWarn)+'</span>':'');
+    var warnText=conflictWarn||(issues.length?issues[0]:repeatWarn);
+    var flag=warnText?' <span style="color:var(--orange);font-size:10px;">⚠ '+escHtml(warnText)+'</span>':'';
     return '<div class="suggest-item" onclick="dsManualPick('+i+',\''+t.id+'\')"><strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong> <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span>'+flag+'</div>';
   }).join('');
 }
