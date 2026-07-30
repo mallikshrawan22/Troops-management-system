@@ -8276,6 +8276,30 @@ function showDashDetail(kind,extra){
     var an=dutiesActiveNow().sort(function(a,b){return (a.postName||a.type).localeCompare(b.postName||b.type);});
     title='On Duty Now ('+an.length+')';
     body=an.length?an.map(function(d,i){return dutyMiniCardHTML(d,'anD'+i);}).join(''):'<div class="empty">Nobody is on duty right now.</div>';
+    // Diagnostic breakdown — every non-cancelled duty dated today or
+    // yesterday, with its real stored date/time and the exact live status
+    // (active/upcoming/completed) the app is computing for it right now.
+    // Lets a mismatch between "should be active" and what's actually
+    // stored be spotted directly on the phone, no desktop console needed.
+    var todayISOd=new Date().toISOString().slice(0,10);
+    var ydayISOd=isoAddDays(todayISOd,-1);
+    var diagRows=D.duties.filter(function(d){return !d.cancelled&&(d.date===todayISOd||d.date===ydayISOd);})
+      .sort(function(a,b){return (a.date+a.startTime).localeCompare(b.date+b.startTime);});
+    if(diagRows.length){
+      var diagId='diag-onduty-'+Date.now();
+      body+='<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);">'+
+        '<div class="btn btn-ghost btn-sm" onclick="toggleEl(\''+diagId+'\')" style="display:inline-block;">🔍 Diagnostics — all today\'s duty entries ('+diagRows.length+')</div>'+
+        '<div id="'+diagId+'" style="display:none;margin-top:8px;font-size:11.5px;">'+
+        diagRows.map(function(d){
+          var st=dutyLiveStatus(d);
+          var color=st==='active'?'var(--green-light)':(st==='upcoming'?'var(--tan)':'var(--text-muted)');
+          return '<div style="padding:5px 0;border-bottom:1px solid var(--border);">'+
+            '<strong>'+escHtml(d.dutyId||d.id)+'</strong> · '+escHtml(d.postName||d.type)+'<br>'+
+            'stored: '+escHtml(d.date)+' '+escHtml(d.startTime)+' ('+d.durationHours+'h) · troops: '+(d.troops||[]).length+
+            ' · status: <span style="color:'+color+';font-weight:700;">'+st+'</span></div>';
+        }).join('')+
+        '</div></div>';
+    }
   } else if(kind==='free-now'){
     var fd=freeTroopsNowDetailed();
     var fullyFree=fd.filter(function(r){return !r.onDuty&&!r.onPatrol&&!r.onDutyDraft&&!r.onContingency;});
