@@ -4296,6 +4296,20 @@ function dutyQualSatisfied(type,post){
   if(!qual) return true;
   return dutySelectedTroops.some(function(tid){ var t=troopById(tid); return t&&isDutyQualified(t,qual); });
 }
+// The Assign Duty modal's `date`/`start` fields hold the shift's BASE
+// date/time exactly as typed (e.g. picking 30 July + 02:00 means "the
+// post-midnight tail of the night of 30 July"), not yet rolled onto the
+// real calendar date that dutyRecordCalendarDate() will stamp it with at
+// save time. Every dutyConflict() call below must pass that same period
+// so its rollover-aware real-time comparison agrees with what actually
+// gets saved — otherwise a post-midnight slot here gets compared against
+// other duties using a bare date-string match, which can wrongly collide
+// with an unrelated shift on a different real calendar day just because
+// both happen to share the same typed base date (the exact class of bug
+// already fixed for the Suggest Duty Roster screen above; this modal was
+// missed). This was the root cause of soldiers with no real conflict
+// still being flagged/blocked here after a shift-duration change shifted
+// which real date their post-midnight slot rolls onto.
 function dutyTroopSuggest(val){
   var box=document.getElementById('duty-troop-suggest');
   if(!val||val.length===0){box.style.display='none';return;}
@@ -4313,7 +4327,7 @@ function dutyTroopSuggest(val){
     // Reserved by ANY uncompleted patrol draft, regardless of that
     // draft's own date (Priority 1 — Patrol Draft Reservation).
     var onDraft=!!patrolReserved[t.id];
-    var onDutyDraft=!onDraft&&date&&dutyConflict(t.id,date,start,dur,editingDutyId,null).draftDuty;
+    var onDutyDraft=!onDraft&&date&&dutyConflict(t.id,date,start,dur,editingDutyId,null,start?(isDayTime(start)?'day':'night'):null).draftDuty;
     var completed=!onDraft&&!onDutyDraft&&date&&D.patrols.some(function(p){return p.date===date&&(p.troops||[]).indexOf(t.id)>=0;});
     var flag=onDraft?' <span style="color:var(--red-light);font-size:10px;">🚫 reserved — ongoing patrol draft</span>'
       :(onDutyDraft?' <span style="color:var(--red-light);font-size:10px;">🚫 reserved — unlogged duty draft</span>'
@@ -4370,7 +4384,7 @@ function renderRemainingDutyTroops(){
     // shown here too so a reserved troop doesn't look identical to a free
     // one just because this list is reached by scrolling instead of typing.
     var onDraft=!!patrolReserved[t.id];
-    var onDutyDraft=!onDraft&&date&&dutyConflict(t.id,date,start,dur,editingDutyId,null).draftDuty;
+    var onDutyDraft=!onDraft&&date&&dutyConflict(t.id,date,start,dur,editingDutyId,null,start?(isDayTime(start)?'day':'night'):null).draftDuty;
     var onContingency=!onDraft&&!onDutyDraft&&date&&isContingencyExcluded(t.id,date,start?(isDayTime(start)?'day':'night'):null);
     var warn=(onDraft||onDutyDraft)?' title="🚫 reserved — '+(onDraft?'ongoing patrol draft':'unlogged duty draft')+'" style="margin:2px 3px 2px 0;display:inline-block;cursor:pointer;border-color:var(--red-light);color:var(--red-light);"'
       :(onContingency?' title="⚠ Contingency Mode active for this date/shift" style="margin:2px 3px 2px 0;display:inline-block;cursor:pointer;border-color:var(--orange);color:var(--orange);"'
@@ -4390,7 +4404,7 @@ function dutyRefreshConflicts(){
   if(date&&start&&dutySelectedTroops.length){
     dutySelectedTroops.forEach(function(tid){
       var t=troopById(tid); if(!t) return;
-      var c=dutyConflict(tid,date,start,dur,editingDutyId,null);
+      var c=dutyConflict(tid,date,start,dur,editingDutyId,null,start?(isDayTime(start)?'day':'night'):null);
       if(c.duty) warnMsgs.push(upLabel(t.rank,t.name)+' is already on another overlapping duty this day.');
       if(c.draftDuty) warnMsgs.push(upLabel(t.rank,t.name)+' is already reserved in another unlogged duty draft — cannot also be put on duty until it\'s logged or cancelled.');
       // An unlogged (ongoing) patrol draft blocks duty entirely — we don't
@@ -4436,7 +4450,7 @@ function dutySuggestTroop(){
       if(dutySelectedTroops.indexOf(t.id)>=0) return false;
       if(dutyEligibilityIssues(t,type,post).length>0) return false;
       if(qualFilter&&!isDutyQualified(t,qual)) return false;
-      var c=dutyConflict(t.id,date,start,dur,editingDutyId,null);
+      var c=dutyConflict(t.id,date,start,dur,editingDutyId,null,start?(isDayTime(start)?'day':'night'):null);
       if(c.duty||c.patrol||c.draftDuty) return false;
       if(genderFilter&&t.gender!=='Female') return false;
       return true;
@@ -4596,7 +4610,7 @@ function saveDuty(){
   // it's logged (Priority 1 — Duty Draft Reservation).
   var dutyDraftConflicts=dutySelectedTroops.map(troopById).filter(function(t){
     if(!t) return false;
-    var c=dutyConflict(t.id,date,start,dur,editingDutyId,null);
+    var c=dutyConflict(t.id,date,start,dur,editingDutyId,null,start?(isDayTime(start)?'day':'night'):null);
     return c.draftDuty;
   });
   if(dutyDraftConflicts.length>0){
