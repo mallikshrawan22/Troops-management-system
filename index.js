@@ -407,7 +407,7 @@ async function migrateSchema() {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)');
     console.log('Schema check OK: blood_group, deployment_date, weapon_number, gender, category, trade, driver_quals, target_pct, never_suggest, restricted_range, duty_quals, is_senior_sergeant, never_duty, status_since, excluded_days, absences, ptl_seq, sessions table present.');
   } catch (e) {
-    console.error('Schema migration failed:', e.message);
+    console.error('Schema migration failed:', e.message || '(no message)', '| code:', e.code || '-', '| detail:', e.detail || '-', '| full:', e);
   }
 }
 
