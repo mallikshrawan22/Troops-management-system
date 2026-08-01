@@ -5347,7 +5347,7 @@ function renderDsResults(){
           '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
           '<div style="font-size:13.5px;">'+(t?('<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+(repeatWarn?' <span style="color:var(--orange);font-size:10.5px;" title="'+escHtml(repeatWarn)+'">⚠ '+escHtml(repeatWarn)+'</span>':'')):'<span style="color:var(--red-light);">— none available —</span>')+'</div>'+
           '<div style="display:flex;gap:6px;flex-shrink:0;">'+
-          '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:5px 9px;white-space:nowrap;" onclick="dsReplaceSlot('+i+')" title="Next fairest alternative">🔁</button>'+
+          '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:5px 9px;white-space:nowrap;" onclick="dsDeleteSlot('+i+')" title="Remove this troop (goes back to Remaining Troops)">🗑️</button>'+
           '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:5px 9px;white-space:nowrap;'+(manualOpen?'border-color:var(--tan);color:var(--tan);':'')+'" onclick="dsToggleManualPick('+i+')" title="Pick a specific troop">🔍</button>'+
           '</div></div>'+
           (manualOpen?('<div style="position:relative;margin-top:6px;">'+
@@ -5494,14 +5494,14 @@ function dutyEligibilityIssuesRaw(t,post,slot){
   if(_dsDate&&isContingencyExcluded(t.id,_dsDate,slot?(isDayTime(slot.startTime)?'day':'night'):null)) issues.push('Contingency Mode active for this date/shift');
   return issues;
 }
-function dsReplaceSlot(i){
+function dsDeleteSlot(i){
   var slot=_dsSlots[i];
-  var usedElsewhere={};
-  _dsSlots.forEach(function(s,idx){ if(idx!==i&&s.chosenId) usedElsewhere[s.chosenId]=true; });
-  for(var j=slot.poolPos+1;j<slot.pool.length;j++){
-    if(!usedElsewhere[slot.pool[j]]){ slot.chosenId=slot.pool[j]; slot.poolPos=j; renderDsResults(); return; }
-  }
-  showAlert('ds-warnings','No more alternatives available for this slot.','warn');
+  if(!slot||!slot.chosenId) return;
+  slot.chosenId=null; slot.poolPos=-1;
+  // renderDsResults() re-derives usedIds from each slot's current
+  // chosenId and also refreshes Remaining Troops (if that panel is open),
+  // so the removed troop shows back up there automatically.
+  renderDsResults();
 }
 function dsSlotsToDutyRecords(){
   return _dsSlots.filter(function(s){return s.chosenId;}).reduce(function(acc,s){
