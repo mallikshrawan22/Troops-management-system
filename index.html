@@ -3460,27 +3460,51 @@ function contingencyExcludedTroopIds(date,shift){
 function isTroopReserved(tid,opts){
   opts=opts||{};
   var todayISO=new Date().toISOString().slice(0,10);
-  var isToday=opts.date&&opts.date===todayISO;
-  // "Today" collapses to the live right-now check ONLY when the shift
-  // being asked about is either unspecified (an open/urgent query) or IS
-  // the shift actually in progress at this exact moment. Planning ahead
-  // for a shift that's today's date but hasn't started yet — e.g.
-  // generating tonight's Night roster while it's still daytime — must NOT
-  // collapse to "right now", because "right now" is checking the WRONG
-  // shift entirely: it would see a troop's currently-active, unlogged Day
-  // duty and wrongly block them from a Night slot that won't even start
-  // for hours and can't actually overlap it. In that case, fall through to
-  // a proper window check scoped to just the requested shift's true
-  // start/end for today (same real-window math already used for future
-  // dates), instead of a live/instant check.
   var dn=D.config.dayNight||DEFAULT_DAY_NIGHT;
   var nowMin=(function(){var n=new Date(); return n.getHours()*60+n.getMinutes();})();
   var currentPeriod=(nowMin>=timeToMin(dn.start)&&nowMin<timeToMin(dn.end))?'day':'night';
-  var useLiveCheck=isToday&&(!opts.shift||opts.shift===currentPeriod);
-  var shiftCheckDate=useLiveCheck?null:(opts.date||null);
-  var checkPeriod=useLiveCheck?null:(opts.shift||null);
-  if(loggedDutyReservedTroopIds(opts.excludeDutyId||null,shiftCheckDate,checkPeriod)[tid]) return true;
-  if(dutyDraftReservedTroopIds(opts.excludeDutyDraftId||null,shiftCheckDate,checkPeriod)[tid]) return true;
+  var shiftCheckDate,checkPeriod,skipDutyCheck=false;
+
+  if(opts.dutyMode){
+    // BUSINESS RULE (confirmed): creating/assigning DUTY (day or night)
+    // reserves a troop for (a) a duty/duty-draft that is ONGOING right
+    // now, (b) any uncompleted patrol draft — patrol created first blocks
+    // duty created after it — and (c) an active Contingency Mode
+    // exclusion.
+    shiftCheckDate=null; checkPeriod=null; // live/ongoing check
+  } else if(opts.patrolMode){
+    // BUSINESS RULE (confirmed): Patrol reservation depends on the
+    // patrol's date and on when it's being created:
+    //  - A patrol for a genuinely future date (not today) — all troops
+    //    are free of duty-based reservation; a roster that far ahead
+    //    isn't reliably built yet and shouldn't hold troops out of a
+    //    nearer-term patrol.
+    //  - A patrol for TODAY, created while it's currently DAY — checks
+    //    the WHOLE day-duty window for today, so an already-scheduled
+    //    Day Duty blocks the patrol even before it starts.
+    //  - A patrol for TODAY, created after night has begun (after
+    //    18:00) — only an ONGOING (right-now) duty and Contingency
+    //    reserve the troop; the rest of the Night Duty roster does not,
+    //    since the large majority of troops are on Night Duty and would
+    //    otherwise leave almost nobody free for a night patrol.
+    var isTodayLocal=opts.date&&opts.date===todayISO;
+    var noDateGiven=!opts.date;
+    if(!isTodayLocal&&!noDateGiven){
+      skipDutyCheck=true;
+    } else if(currentPeriod==='night'){
+      shiftCheckDate=null; checkPeriod=null; // live/ongoing check
+    } else {
+      shiftCheckDate=todayISO; checkPeriod='day'; // whole day-duty window
+    }
+  } else {
+    // Fallback for a caller specifying neither mode — plain live check.
+    shiftCheckDate=null; checkPeriod=null;
+  }
+
+  if(!skipDutyCheck){
+    if(loggedDutyReservedTroopIds(opts.excludeDutyId||null,shiftCheckDate,checkPeriod)[tid]) return true;
+    if(dutyDraftReservedTroopIds(opts.excludeDutyDraftId||null,shiftCheckDate,checkPeriod)[tid]) return true;
+  }
   if(draftReservedTroopIds(opts.excludePatrolDraftId||null)[tid]) return true;
   if(contingencyExcludedTroopIds(opts.date||null,opts.shift||null)[tid]) return true;
   return false;
@@ -3538,7 +3562,7 @@ function driverHadNightSentryDayBefore(tid,patrolDateISO){
 function stmEligibleBase(excludeRestricted,patrolDate){
   return D.troops.filter(function(t){
     if(!isAvailable(t)||t.neverSuggest) return false;
-    if(isTroopReserved(t.id,{date:patrolDate||null})) return false;
+    if(isTroopReserved(t.id,{date:patrolDate||null,patrolMode:true})) return false;
     if(excludeRestricted&&t.restrictedRange) return false;
     if(patrolDate&&stmDateConflict(t.id,patrolDate)) return false;
     if(t.trade==='Driver'&&patrolDate&&driverHadNightSentryDayBefore(t.id,patrolDate)) return false;
@@ -3980,7 +4004,7 @@ function stmManualSearch(i,val){
   var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){
     if(usedElsewhere[t.id]) return false;
     if((t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)<0) return false;
-    if(isTroopReserved(t.id,{date:patrolDate})) return false;
+    if(isTroopReserved(t.id,{date:patrolDate,patrolMode:true})) return false;
     if(patrolDate&&stmDateConflict(t.id,patrolDate)) return false;
     return true;
   });
@@ -4005,7 +4029,7 @@ function stmManualPick(i,troopId){
 function stmUpdateRemainingCount(){
   var usedIds={}; (_stmSlots||[]).forEach(function(s){ if(s.chosenId) usedIds[s.chosenId]=true; });
   var patrolDate=parseDate(document.getElementById('stm-patrol-date').value)||null;
-  var n=D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:patrolDate})&&!(patrolDate&&stmDateConflict(t.id,patrolDate));}).length;
+  var n=D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:patrolDate,patrolMode:true})&&!(patrolDate&&stmDateConflict(t.id,patrolDate));}).length;
   var el=document.getElementById('stm-remaining-count');
   if(el) el.textContent=n;
 }
@@ -4021,7 +4045,7 @@ function renderStmRemainingTroops(){
   if(!el) return;
   var usedIds={}; (_stmSlots||[]).forEach(function(s){ if(s.chosenId) usedIds[s.chosenId]=true; });
   var patrolDate=parseDate(document.getElementById('stm-patrol-date').value)||null;
-  var remaining=sortTroops(D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:patrolDate})&&!(patrolDate&&stmDateConflict(t.id,patrolDate));}));
+  var remaining=sortTroops(D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:patrolDate,patrolMode:true})&&!(patrolDate&&stmDateConflict(t.id,patrolDate));}));
   stmUpdateRemainingCount();
   if(remaining.length===0){ el.innerHTML='<div class="empty" style="padding:6px 0;">No remaining troops available.</div>'; return; }
   var hint=(_stmManualPickSlot>=0)
@@ -4172,7 +4196,7 @@ function draftTroopSuggest(val){
   if(!val||val.length===0){box.style.display='none';return;}
   var q=val.toLowerCase();
   var plannedDate=parseDate(document.getElementById('draft-planned-date').value)||null;
-  var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){return (t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)>=0&&draftEditTroops.indexOf(t.id)<0&&!isTroopReserved(t.id,{excludePatrolDraftId:draftEditingId,date:plannedDate});});
+  var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){return (t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)>=0&&draftEditTroops.indexOf(t.id)<0&&!isTroopReserved(t.id,{excludePatrolDraftId:draftEditingId,date:plannedDate,patrolMode:true});});
   if(matches.length===0){box.style.display='none';return;}
   box.style.display='block';
   box.innerHTML=matches.slice(0,8).map(function(t){ return '<div class="suggest-item" onclick="addTroopToDraft(\''+t.id+'\')">'+'<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+' <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span></div>'; }).join('');
@@ -4573,8 +4597,7 @@ function openReplaceFlow(outTroopId){
     if(dutySelectedTroops.indexOf(t.id)>=0) return false;
     if((t.rank+' '+t.name).toLowerCase().indexOf(q)<0) return false;
     // Patrol drafts reserve their troops regardless of the draft's own
-    // date (same rule as everywhere else — draftReservedTroopIds), not
-    // just when the draft's plannedDate happens to match this duty's date.
+    // date (same rule as everywhere else — draftReservedTroopIds).
     if(draftReservedTroopIds()[t.id]) return false;
     // Also check other unlogged duty drafts for this exact shift, same as
     // the search box above (dutyTroopSuggest) and the suggestion engine.
@@ -5348,7 +5371,7 @@ function renderDsResults(){
 // works too). Tap a slot's 🔍 to open its picker, then tap a name here.
 function dsUpdateRemainingCount(){
   var usedIds={}; _dsSlots.forEach(function(s){ if(s.chosenId) usedIds[s.chosenId]=true; });
-  var n=D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:_dsDate,excludeDutyDraftId:_editingDutyDraftId,shift:_dsPeriod});}).length;
+  var n=D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:_dsDate,excludeDutyDraftId:_editingDutyDraftId,shift:_dsPeriod,dutyMode:true});}).length;
   var el=document.getElementById('ds-remaining-count');
   if(el) el.textContent=n;
 }
@@ -5363,7 +5386,7 @@ function renderDsRemainingTroops(){
   var el=document.getElementById('ds-remaining-troops');
   if(!el) return;
   var usedIds={}; _dsSlots.forEach(function(s){ if(s.chosenId) usedIds[s.chosenId]=true; });
-  var remaining=sortTroops(D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:_dsDate,excludeDutyDraftId:_editingDutyDraftId,shift:_dsPeriod});}));
+  var remaining=sortTroops(D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:_dsDate,excludeDutyDraftId:_editingDutyDraftId,shift:_dsPeriod,dutyMode:true});}));
   dsUpdateRemainingCount();
   if(remaining.length===0){ el.innerHTML='<div class="empty" style="padding:6px 0;">No remaining troops available.</div>'; return; }
   var hint=(_dsManualPickSlot>=0)
@@ -6942,15 +6965,21 @@ function shiftsOverlap(aStart,aDur,bStart,bDur){
 function dutyConflict(tid,date,startStr,durHours,excludeDutyId,excludeDutyDraftId,period){
   var duty;
   if(period){
-    var realDate=dutyRecordCalendarDate(date,startStr,period);
-    var candStart=dutyStartMoment({date:realDate,startTime:startStr});
-    var candEnd=dutyEndMoment({date:realDate,startTime:startStr,durationHours:durHours});
+    // BUSINESS RULE (confirmed): a troop is reserved from being put on
+    // Duty (day or night) only by a duty that is ONGOING right now — i.e.
+    // literally in progress at this exact moment — not by any future or
+    // past-relative-to-now shift, and not by the specific slot being
+    // searched. "Ongoing" still uses each existing duty's real,
+    // midnight-rollover-aware start/end (dutyStartMoment/dutyEndMoment),
+    // so a post-midnight shift is correctly evaluated against "now" even
+    // though it's stamped on the following calendar date.
+    var nowLive=new Date();
     duty=D.duties.some(function(d){
       if(d.cancelled) return false;
       if(d.id===excludeDutyId) return false;
       if((d.troops||[]).indexOf(tid)<0) return false;
       var dStart=dutyStartMoment(d), dEnd=dutyEndMoment(d);
-      return dStart<candEnd && candStart<dEnd;
+      return nowLive>=dStart && nowLive<dEnd;
     });
   } else {
     duty=D.duties.some(function(d){
@@ -6995,7 +7024,7 @@ function dutyConflict(tid,date,startStr,durHours,excludeDutyId,excludeDutyDraftI
         var rRealDate=dutyRecordCalendarDate(dft.plannedDate,r.startTime,dft.period);
         var rStart=dutyStartMoment({date:rRealDate,startTime:r.startTime});
         var rEnd=dutyEndMoment({date:rRealDate,startTime:r.startTime,durationHours:r.durationHours});
-        return rStart<candEnd && candStart<rEnd;
+        return nowLive>=rStart && nowLive<rEnd;
       });
     });
   } else {
@@ -8406,7 +8435,7 @@ var editingPatrolId=null;
 // new patrol log (Priority 1: "not be selectable for other activities").
 // Excludes the draft actually being logged right now (pendingDraftLogId),
 // since its own troops are already in selectedTroops anyway.
-function troopSuggest(val){ var box=document.getElementById('troop-suggest'); if(!val||val.length===0){box.style.display='none';return;} var q=val.toLowerCase(); var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){return (t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)>=0&&selectedTroops.indexOf(t.id)<0&&!isTroopReserved(t.id,{excludePatrolDraftId:pendingDraftLogId});}); if(matches.length===0){box.style.display='none';return;} box.style.display='block'; box.innerHTML=matches.slice(0,8).map(function(t){ return '<div class="suggest-item" onclick="addTroopToPatrol(\''+t.id+'\')">'+'<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+' <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span></div>'; }).join(''); }
+function troopSuggest(val){ var box=document.getElementById('troop-suggest'); if(!val||val.length===0){box.style.display='none';return;} var q=val.toLowerCase(); var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){return (t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)>=0&&selectedTroops.indexOf(t.id)<0&&!isTroopReserved(t.id,{excludePatrolDraftId:pendingDraftLogId,patrolMode:true});}); if(matches.length===0){box.style.display='none';return;} box.style.display='block'; box.innerHTML=matches.slice(0,8).map(function(t){ return '<div class="suggest-item" onclick="addTroopToPatrol(\''+t.id+'\')">'+'<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+' <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span></div>'; }).join(''); }
 function addTroopToPatrol(id){ if(selectedTroops.indexOf(id)<0) selectedTroops.push(id); document.getElementById('troop-search').value=''; document.getElementById('troop-suggest').style.display='none'; renderSelected(); }
 function removeTroopFromPatrol(id){ selectedTroops=selectedTroops.filter(function(x){return x!==id;}); if(selectedCommander===id) selectedCommander=null; renderSelected(); }
 function renderCommanderDropdown(){
@@ -9300,7 +9329,7 @@ function printArchivedTroops(){
 // clicked, same eligibility check the on-screen panel already uses.
 function printDsRemainingTroops(){
   var usedIds={}; _dsSlots.forEach(function(s){ if(s.chosenId) usedIds[s.chosenId]=true; });
-  var remaining=sortTroops(D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:_dsDate,excludeDutyDraftId:_editingDutyDraftId,shift:_dsPeriod});}));
+  var remaining=sortTroops(D.troops.filter(function(t){return isAvailable(t)&&!usedIds[t.id]&&!isTroopReserved(t.id,{date:_dsDate,excludeDutyDraftId:_editingDutyDraftId,shift:_dsPeriod,dutyMode:true});}));
   var subtitle='<p>'+(_dsDate?fmtDateLong(_dsDate):'')+(_dsPeriod?' · '+(_dsPeriod==='night'?'Night':'Day')+' Shift':'')+'</p><p>'+remaining.length+' troop'+(remaining.length===1?'':'s')+' remaining / unassigned</p>';
   var rows=remaining.length===0?'<tr><td colspan="3" style="text-align:center;color:#888;">No remaining troops.</td></tr>':remaining.map(function(t){
     return '<tr><td>'+t.rank.toUpperCase()+' '+escHtml(t.name.toUpperCase())+'</td><td>'+escHtml(t.unit||'—')+'</td><td>'+escHtml(roleDisplay(t)||t.trade||'—')+'</td></tr>';
