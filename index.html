@@ -4600,8 +4600,11 @@ function openReplaceFlow(outTroopId){
     // date (same rule as everywhere else — draftReservedTroopIds).
     if(draftReservedTroopIds()[t.id]) return false;
     // Also check other unlogged duty drafts for this exact shift, same as
-    // the search box above (dutyTroopSuggest) and the suggestion engine.
-    if(date&&dutyConflict(t.id,date,ed0.startTime,ed0.durationHours,editingDutyId,null).draftDuty) return false;
+    // the search box above (dutyTroopSuggest) and the suggestion engine —
+    // pass the shift's period so this uses the same midnight-aware
+    // "ongoing right now" check as dutyConflict()'s other callers, instead
+    // of the older raw-date-string comparison.
+    if(date&&dutyConflict(t.id,date,ed0.startTime,ed0.durationHours,editingDutyId,null,ed0.startTime?(isDayTime(ed0.startTime)?'day':'night'):null).draftDuty) return false;
     // This picks the first match automatically with no review step, so
     // a Contingency-Mode-restricted troop must be excluded outright here
     // rather than just flagged (as the search box above does).
