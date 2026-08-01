@@ -11,7 +11,7 @@ app.disable('x-powered-by'); // don't advertise "this server runs Express" to sc
 // Locks out random websites/scripts running in a browser from calling
 // this API. This is one extra layer, not the only one — the API key
 // gate below is still the main protection.
-const ALLOWED_ORIGIN = 'https://surekhabmspro.github.io';
+const ALLOWED_ORIGIN = 'https://mallikshrawan22.github.io';
 app.use(cors({
   origin: ALLOWED_ORIGIN,
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
