@@ -11,7 +11,12 @@ app.disable('x-powered-by'); // don't advertise "this server runs Express" to sc
 // Locks out random websites/scripts running in a browser from calling
 // this API. This is one extra layer, not the only one — the API key
 // gate below is still the main protection.
-const ALLOWED_ORIGIN = 'https://mallikshrawan22.github.io';
+//
+// Reads from the ALLOWED_ORIGIN env var if set (Render dashboard →
+// Environment), falling back to the current known-good origin otherwise —
+// so nothing changes for today's deploy, but a future GitHub Pages/repo
+// rename only needs a Render env var update, not a code change + redeploy.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://mallikshrawan22.github.io';
 app.use(cors({
   origin: ALLOWED_ORIGIN,
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
@@ -320,6 +325,13 @@ async function migrateSchema() {
     await pool.query('ALTER TABLE troops ADD COLUMN IF NOT EXISTS is_senior_sergeant BOOLEAN DEFAULT FALSE');
     await pool.query('ALTER TABLE troops ADD COLUMN IF NOT EXISTS never_duty BOOLEAN DEFAULT FALSE');
     await pool.query('ALTER TABLE troops ADD COLUMN IF NOT EXISTS dual_admin BOOLEAN DEFAULT FALSE');
+    // FIX: "Archived Date" was tracked only in browser memory (index.html's
+    // archiveTroop()) and never sent to or stored by the backend — it
+    // reverted to blank on every device, including the one that archived
+    // the troop, the moment the next background sync pulled fresh data
+    // with no date attached. This column plus the /troops/:id/archive
+    // route change below are what actually let it persist.
+    await pool.query('ALTER TABLE troops ADD COLUMN IF NOT EXISTS archived_date DATE');
     await pool.query('ALTER TABLE troops ADD COLUMN IF NOT EXISTS status_since DATE');
     await pool.query('ALTER TABLE troops ADD COLUMN IF NOT EXISTS excluded_days INTEGER DEFAULT 0');
     // Manually-logged Leave/Sick/Other absence periods (item 6) — stored as
@@ -592,11 +604,22 @@ app.delete('/troops/:id', async (req, res) => {
 });
 
 // ── ARCHIVE / UNARCHIVE TROOP ─────────────────────────────────────────
+// FIX: previously only flipped the `archived` boolean — the archived date
+// shown in the app was never actually stored here, so it reverted to
+// blank on every sync (see migrateSchema's archived_date comment above).
+// Accepts an optional archivedDate from the client (the date the person
+// doing the archiving actually saw/chose) so this matches exactly what
+// used to show on their screen; falls back to the server's own date if
+// none is provided (e.g. an older queued outbox entry from before this
+// fix). Unarchiving always clears it back to NULL, same as the client
+// already does locally (delete t.archivedDate).
 app.patch('/troops/:id/archive', async (req, res) => {
   try {
+    const archived = !!req.body.archived;
+    const archivedDate = archived ? (req.body.archivedDate || new Date().toISOString().slice(0, 10)) : null;
     await pool.query(
-      'UPDATE troops SET archived = $1 WHERE id = $2',
-      [req.body.archived, req.params.id]
+      'UPDATE troops SET archived = $1, archived_date = $2 WHERE id = $3',
+      [archived, archivedDate, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
