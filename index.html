@@ -970,6 +970,35 @@ body.light-mode ::-webkit-scrollbar-thumb{background:#a8c4ad;}
 /* ── SECTION TRANSITIONS ── */
 .section{animation:fadein 0.15s ease;}
 @keyframes fadein{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+
+/* ── USER GUIDE ── */
+.guide-toc{display:flex;flex-wrap:wrap;gap:6px 10px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border);}
+.guide-toc a{font-family:var(--font-mono);font-size:11.5px;color:var(--tan);text-decoration:none;letter-spacing:0.3px;
+  padding:4px 9px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);white-space:nowrap;}
+.guide-toc a:hover{background:var(--tan);color:var(--bg);}
+.guide-group{margin-bottom:18px;}
+.guide-group>.card-title{margin-bottom:10px;}
+details.guide-item{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--surface2);overflow:hidden;}
+details.guide-item summary{list-style:none;cursor:pointer;padding:12px 14px;font-weight:700;font-size:13.5px;
+  color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:10px;}
+details.guide-item summary::-webkit-details-marker{display:none;}
+details.guide-item summary::after{content:'+';font-family:var(--font-mono);font-size:16px;color:var(--tan);
+  flex-shrink:0;transition:transform 0.2s var(--ease);}
+details.guide-item[open] summary::after{transform:rotate(45deg);}
+details.guide-item[open] summary{border-bottom:1px solid var(--border);}
+.guide-body{padding:4px 14px 14px;font-size:13.5px;line-height:1.65;color:var(--text-muted);}
+.guide-body p{margin:0 0 10px;}
+.guide-body p:last-child{margin-bottom:0;}
+.guide-body ol,.guide-body ul{margin:0 0 10px;padding-left:20px;}
+.guide-body li{margin-bottom:5px;}
+.guide-body strong{color:var(--text);}
+.guide-body code{font-family:var(--font-mono);font-size:12px;background:var(--surface);border:1px solid var(--border);
+  border-radius:4px;padding:1px 5px;color:var(--tan);}
+.guide-note{border-left:3px solid var(--blue);background:rgba(91,141,239,0.08);border-radius:0 8px 8px 0;
+  padding:9px 12px;margin:10px 0;font-size:12.5px;}
+.guide-warn{border-left:3px solid var(--orange);background:rgba(240,160,75,0.08);border-radius:0 8px 8px 0;
+  padding:9px 12px;margin:10px 0;font-size:12.5px;}
+.guide-live{font-family:var(--font-mono);color:var(--green-light);}
 </style>
 </head>
 <body>
@@ -1041,6 +1070,7 @@ body.light-mode ::-webkit-scrollbar-thumb{background:#a8c4ad;}
   <div class="sidebar-label">System</div>
   <div class="sidebar-item" onclick="showTab('troops')" data-tab="troops"><span class="si-icon">👥</span> Troops</div>
   <div class="sidebar-item" onclick="showTab('system')" data-tab="system"><span class="si-icon">🔐</span> System</div>
+  <div class="sidebar-item" onclick="showTab('user-guide')" data-tab="user-guide"><span class="si-icon">❓</span> User Guide</div>
 </nav>
 
 <!-- MAIN CONTENT -->
@@ -1748,6 +1778,282 @@ body.light-mode ::-webkit-scrollbar-thumb{background:#a8c4ad;}
   </div>
 </div>
 
+<!-- ===== USER GUIDE ===== -->
+<div id="user-guide" class="section">
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">❓ User Guide</div>
+    <p style="color:var(--text-muted);font-size:13px;">
+      Everything below reflects how the app works today. Tap any topic to expand it — nothing here requires the Security PIN, so anyone can find their way even before they're set up with one.
+    </p>
+    <div class="guide-note" id="guide-live-box">
+      <strong>Your current setup:</strong> Unit — <span class="guide-live" id="guide-live-pob">not set yet</span>
+      &nbsp;·&nbsp; Mission — <span class="guide-live" id="guide-live-mission">not set yet</span>
+    </div>
+  </div>
+
+  <div class="guide-toc">
+    <a href="#guide-start">Getting Started</a>
+    <a href="#guide-reservation">Reservation System</a>
+    <a href="#guide-patrol">Patrol Mode</a>
+    <a href="#guide-duty">Duty Management</a>
+    <a href="#guide-troops">Troops</a>
+    <a href="#guide-system">System</a>
+    <a href="#guide-reports">Reports &amp; Printing</a>
+    <a href="#guide-sync">Offline &amp; Sync</a>
+    <a href="#guide-faq">Troubleshooting</a>
+  </div>
+
+  <!-- GETTING STARTED -->
+  <div class="guide-group" id="guide-start">
+    <div class="card-title">🔑 Getting Started</div>
+
+    <details class="guide-item">
+      <summary>Signing in for the first time</summary>
+      <div class="guide-body">
+        <p>The first time this app runs on a device, it asks for a <strong>Device Name</strong> (e.g. "Rekha's Phone") and the shared <strong>Master Key</strong>. Everyone using this app shares the same master key — it's not a personal password, it just identifies devices that are allowed to sync.</p>
+        <p>You can tap <strong>Continue Offline</strong> instead to browse whatever data is already saved locally on this device, without signing in — useful if you just need to look something up and don't have the key handy. You won't be able to sync or save changes until you do sign in.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Patrol Mode vs Duty Management Mode</summary>
+      <div class="guide-body">
+        <p>The two buttons at the top of the app switch between <strong>Patrol</strong> and <strong>Duty Management</strong> — they're almost entirely separate systems that happen to share the same troop roster. Patrol handles foot/vehicle patrols and their rotation; Duty Management handles guard posts, sentries, and shift rosters. <strong>Troops</strong> and <strong>System</strong> (bottom of the menu) are shared by both and don't change when you switch modes.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>The Security PIN</summary>
+      <div class="guide-body">
+        <p>If a PIN is set (System → Security PIN), it's required once per session before you can view anything other than the two dashboards or this guide. It protects logging, editing, deleting, and archiving — not just viewing. If you forget it, use the security question you set up when creating it.</p>
+      </div>
+    </details>
+  </div>
+
+  <!-- RESERVATION SYSTEM -->
+  <div class="guide-group" id="guide-reservation">
+    <div class="card-title">🔒 Reservation System</div>
+
+    <details class="guide-item">
+      <summary>What "reserved" actually means</summary>
+      <div class="guide-body">
+        <p>The app automatically stops a troop from being double-booked — put on a patrol and a duty at the same time, or on two things that clash. You never manage this by hand; it happens invisibly every time <strong>Suggest Team</strong> or <strong>Suggest Duty</strong> builds a list. A reserved troop simply won't appear as an option — you don't need to remember to exclude them yourself.</p>
+        <p>A troop counts as reserved for a given time if <strong>any</strong> of these is true:</p>
+        <ul>
+          <li>They're already logged on a duty that overlaps that time</li>
+          <li>They're on an unfinished <strong>Duty Draft</strong> for that time (saved but not yet logged)</li>
+          <li>They're on an unfinished <strong>Patrol Draft</strong> (saved but not yet logged)</li>
+          <li>They're currently blocked by an active <strong>Contingency Mode</strong> exclusion</li>
+        </ul>
+        <p>Drafts count on purpose — a saved-but-not-yet-logged plan is treated as a real booking, since it usually does go on to become one.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Why the timing rules differ for Patrol vs. Duty</summary>
+      <div class="guide-body">
+        <p>This part is deliberately timing-aware so it doesn't over-block — otherwise almost the entire unit could end up looking "unavailable" at once.</p>
+        <p><strong>When planning a Patrol:</strong></p>
+        <ul>
+          <li>For a <strong>future date</strong> — nobody is blocked by duty yet; a roster that far out isn't reliable to check against.</li>
+          <li>For <strong>today, during the day</strong> — the whole day's Day Duty roster blocks a same-day patrol.</li>
+          <li>For <strong>today, after night has begun</strong> — only someone actually mid-shift <em>right now</em> is blocked, not the whole Night Duty roster. Most of the unit is naturally on Night Duty by then, so blocking all of them would leave almost nobody free for a night patrol.</li>
+        </ul>
+        <p><strong>When planning a Duty shift:</strong> the check instead looks at the <em>real time window</em> of the specific shift you're suggesting for — so a troop finishing today's Day Duty isn't wrongly held back from tonight's Night Duty, since the two don't actually overlap.</p>
+        <div class="guide-note">If someone you expected to see is missing from a suggestion, this is almost always why — check whether they're on a draft, an overlapping duty, or a Contingency exclusion before assuming something's broken.</div>
+      </div>
+    </details>
+  </div>
+
+  <!-- PATROL MODE -->
+  <div class="guide-group" id="guide-patrol">
+    <div class="card-title">🚶 Patrol Mode</div>
+
+    <details class="guide-item">
+      <summary>Suggest Team — how the algorithm picks troops</summary>
+      <div class="guide-body">
+        <p>Dashboard → <strong>Suggest Team</strong> builds a proposed patrol automatically. It fills specialist roles first (driver, JCO, medical, signal — whichever you tick), then fills the remaining "Others" seats by <strong>duty-%-rotation</strong>: whoever has the lowest share of patrol hours relative to their time deployed goes first, so participation stays balanced over time.</p>
+        <p><strong>Female pairing rule:</strong> if any female troops are included, the app never assigns a single, uncompanioned female — they're only added in pairs (or as a pair alongside a female specialist), never as a lone seat. This is automatic and can't be turned off.</p>
+        <p>Once generated, you can tap any troop to <strong>Replace</strong> them with the next-best alternative, or manually pick someone specific. You can also save the whole thing as a <strong>Draft</strong> to log later instead of committing immediately.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Logging a patrol manually</summary>
+      <div class="guide-body">
+        <p>Patrol Log → the ⚡ button opens a form to log a patrol by hand — pick troops, type, area, route, duration, and remarks yourself, without going through Suggest Team. Useful for anything the algorithm shouldn't decide, like an ad-hoc or emergency patrol.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Patrol Log — editing, deleting, filtering</summary>
+      <div class="guide-body">
+        <p>Every logged patrol can be edited or deleted from here (PIN required if one is set). Use the filters to narrow by date range, type, or troop — helpful when preparing a report for a specific period rather than scrolling the full history.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Inactive Troops</summary>
+      <div class="guide-body">
+        <p>Lists troops who haven't been on a patrol in a while, sorted by how overdue they are. Use this to spot-check that the rotation is actually reaching everyone, not just the same handful of people.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Participation Status</summary>
+      <div class="guide-body">
+        <p>Shows every troop's participation percentage — their share of patrol hours against the unit average since their own deployment date, not since the unit started. A troop who joined last month is judged against last month's average, not the whole tour's.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Report &amp; Drafts</summary>
+      <div class="guide-body">
+        <p><strong>Report</strong> generates a printable summary for a chosen month/year. <strong>Drafts</strong> (top of Dashboard) holds any patrol you saved from Suggest Team without logging it yet — open a draft to review, edit, or finally commit it.</p>
+      </div>
+    </details>
+  </div>
+
+  <!-- DUTY MANAGEMENT -->
+  <div class="guide-group" id="guide-duty">
+    <div class="card-title">🛡 Duty Management</div>
+
+    <details class="guide-item">
+      <summary>Duty Suggestion — how shifts get filled</summary>
+      <div class="guide-body">
+        <p>Duty Dashboard → <strong>Suggest Duty</strong> fills every post/shift for a chosen date and period (day or night). It fills rank-restricted and gender-restricted posts first, applies your configured driver quota, then fills everything else by the same duty-%-rotation idea as patrols — least-recently/least-often on duty goes first.</p>
+        <p>Troops on leave, sick, or otherwise unavailable are automatically excluded, as are any troop-to-troop <strong>Contingency Exclusion Groups</strong> you've set up (Duty Settings) — e.g. two people who should never be posted together.</p>
+        <p>Each assigned troop has a 🗑️ button to remove them (they go back to the remaining-troops pool) — that's the <strong>red</strong> button; don't confuse it with the neutral pick/search button next to it.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Duty Roster</summary>
+      <div class="guide-body">
+        <p>Shows and lets you edit the committed duty roster for a given date — swap troops, mark someone as a replacement, or cancel a slot entirely (cancelled slots are kept in history, not deleted, so the record stays intact).</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Duty History &amp; Soldier Duty Lookup</summary>
+      <div class="guide-body">
+        <p><strong>Duty History</strong> lists every logged duty, filterable by date/post/type. <strong>Soldier Duty Lookup</strong> flips that around — pick a troop and see their entire duty record, useful when someone asks "when was I last on sentry."</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Duty Settings — posts, shifts, quotas, exclusion groups</summary>
+      <div class="guide-body">
+        <p>This is where the whole duty system is configured: the list of posts (with rank/gender requirements), shift timings, driver quota per shift type, and Contingency Exclusion Groups. Changing these affects future Suggest Duty runs only — it never rewrites duties already logged.</p>
+      </div>
+    </details>
+  </div>
+
+  <!-- TROOPS -->
+  <div class="guide-group" id="guide-troops">
+    <div class="card-title">👥 Troops</div>
+
+    <details class="guide-item">
+      <summary>Adding, editing, and archiving a troop</summary>
+      <div class="guide-body">
+        <p><strong>+ Add Troop</strong> creates a new roster entry. Every field can be edited later from their profile. <strong>Archiving</strong> (rather than deleting) removes someone from active rotation while keeping their full patrol/duty history intact and viewable under Archived — use this for anyone who's left, rather than deleting them outright.</p>
+        <div class="guide-note">Deleting a troop is permanent and removes their history too. Archiving is almost always what you actually want.</div>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Filter, search, and print the roster</summary>
+      <div class="guide-body">
+        <p>Search by name, rank, or service number; filter by rank, gender, or eligibility. The <strong>Print</strong> button generates a clean printable roster using whatever filter is currently active.</p>
+      </div>
+    </details>
+  </div>
+
+  <!-- SYSTEM -->
+  <div class="guide-group" id="guide-system">
+    <div class="card-title">🔐 System</div>
+
+    <details class="guide-item">
+      <summary>Unit Identity — and why it matters everywhere</summary>
+      <div class="guide-body">
+        <p>POB/Unit Name, Mission/Operation, Commander, and Classification here feed <strong>every</strong> printed report and the Dashboard — set them once and they show up consistently everywhere, with nothing hardcoded. Leave a field blank and it just doesn't appear on reports, rather than showing a placeholder.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Backup &amp; Restore</summary>
+      <div class="guide-body">
+        <p>Exports your entire dataset — troops, patrols, duties, settings, everything — as a single JSON file you can save anywhere. <strong>Restore</strong> loads one back in, completely replacing what's currently on this device and pushing it to the server. Take a backup before any major change you're unsure about.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Device Sessions &amp; the "Main Device"</summary>
+      <div class="guide-body">
+        <p>Every device that signs in gets its own session. Exactly one at a time holds <strong>Main</strong> status, and only the Main device can deactivate other devices from <strong>Manage Devices</strong>.</p>
+        <p>Signing in again from a device you've used before does <strong>not</strong> automatically restore its old Main status — logins always create a fresh session, since the app has no way to recognize "the same phone as before." If you need to reclaim Main and don't currently have a working Main session, use <strong>Sign In / Recover Main Access</strong> below it, then <strong>"Lost your main device?"</strong> inside that screen.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Ranks &amp; Additional Troop Roles</summary>
+      <div class="guide-body">
+        <p>Ranks are ordered top-to-bottom by seniority — this order drives who's picked as patrol commander automatically. Additional Troop Roles adds extra options to a troop's Role field beyond the built-in list.</p>
+        <p><strong>Current ranks, highest seniority first:</strong> <span class="guide-live" id="guide-live-ranks">—</span></p>
+      </div>
+    </details>
+  </div>
+
+  <!-- REPORTS -->
+  <div class="guide-group" id="guide-reports">
+    <div class="card-title">📈 Reports &amp; Printing</div>
+    <details class="guide-item">
+      <summary>Which report is which</summary>
+      <div class="guide-body">
+        <ul>
+          <li><strong>Patrol Report</strong> — full monthly patrol summary with participation figures</li>
+          <li><strong>Patrol Log Summary</strong> — a condensed list of patrols over a chosen range</li>
+          <li><strong>Participation Status</strong> — every troop's participation % in table form</li>
+          <li><strong>Command Handover</strong> — a snapshot built for handing responsibility to the next commander</li>
+          <li><strong>Duty Draft / Patrol Draft</strong> — a proposed (not-yet-logged) team or roster, for review before committing</li>
+        </ul>
+        <p>All of them read Unit Identity from Settings and print with a classification banner if one's set.</p>
+      </div>
+    </details>
+  </div>
+
+  <!-- SYNC -->
+  <div class="guide-group" id="guide-sync">
+    <div class="card-title">📶 Offline &amp; Sync</div>
+    <details class="guide-item">
+      <summary>What happens with no connection</summary>
+      <div class="guide-body">
+        <p>The app keeps working offline — anything you log, edit, or save while disconnected is queued locally and sent automatically the moment connectivity returns. The green/amber/red dot near the top shows current sync status. You don't need to do anything manually; just don't force-close the app mid-sync.</p>
+      </div>
+    </details>
+  </div>
+
+  <!-- FAQ -->
+  <div class="guide-group" id="guide-faq">
+    <div class="card-title">🔧 Troubleshooting</div>
+
+    <details class="guide-item">
+      <summary>My printed reports show a blank unit name</summary>
+      <div class="guide-body"><p>Set it once in System → Unit Identity — it's blank by default on a fresh install so the app isn't tied to any one unit, and every report follows whatever's there.</p></div>
+    </details>
+
+    <details class="guide-item">
+      <summary>I can't become the Main Device</summary>
+      <div class="guide-body"><p>This means another session is already holding Main. Use System → Sign In / Recover Main Access → "Lost your main device?" with the master key to reclaim it — see Device Sessions above for the full explanation.</p></div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Two duties/patrols show the same reference number</summary>
+      <div class="guide-body"><p>Numbers self-correct automatically the next time any device syncs — no action needed, and no data is lost even if you spot a temporary duplicate.</p></div>
+    </details>
+  </div>
+</div>
+
 </main>
 
 <!-- Handover — modal, embedded inside Report via a "View Handover" button -->
@@ -2320,6 +2626,7 @@ body.light-mode ::-webkit-scrollbar-thumb{background:#a8c4ad;}
   <div class="more-item" data-mode="duty" style="display:none;" onclick="showTabFromMore('soldier-duty-lookup')"><span class="mi-icon">🔎</span><span class="mi-label">Soldier Duty Lookup</span></div>
   <div class="more-item" data-mode="duty" style="display:none;" onclick="showTabFromMore('duty-settings')"><span class="mi-icon">⚙️</span><span class="mi-label">Duty Settings</span></div>
   <div class="more-item" onclick="showTabFromMore('system')"><span class="mi-icon">🔐</span><span class="mi-label">System</span></div>
+  <div class="more-item" onclick="showTabFromMore('user-guide')"><span class="mi-icon">❓</span><span class="mi-label">User Guide</span></div>
 </div>
 
 <!-- TOAST -->
@@ -7541,7 +7848,7 @@ function showTab(id){
   // section requires the PIN once per session — after that,
   // _pinUnlockedThisSession (set inside submitPin) means no further
   // prompts until locked again.
-  if(id!=='dashboard' && id!=='duty-dashboard' && hasPinSet() && !_pinUnlockedThisSession){
+  if(id!=='dashboard' && id!=='duty-dashboard' && id!=='user-guide' && hasPinSet() && !_pinUnlockedThisSession){
     requirePin(function(){ _showTabInner(id); }, function(){});
     return;
   }
@@ -7577,6 +7884,7 @@ function _showTabInner(id){
     'duty-history':function(){ populateDutyHistoryFilters(); renderDutyHistoryList(); },
     'soldier-duty-lookup':function(){ renderSoldierDutyLookup(); },
     'duty-settings':renderSettings,
+    'user-guide':renderUserGuide,
     system:renderSettings,
     report:function(){populateReportYears();genReport();},
     settings:renderSettings,
@@ -7667,6 +7975,13 @@ function showTabFromMore(id){ closeMoreMenu(); showTab(id); }
 // =====================================================================
 // SETTINGS
 // =====================================================================
+function renderUserGuide(){
+  var s=D.settings||{}, c=D.config||{};
+  var pobEl=document.getElementById('guide-live-pob'); if(pobEl) pobEl.textContent=s.pob||'not set yet';
+  var missionEl=document.getElementById('guide-live-mission'); if(missionEl) missionEl.textContent=s.mission||'not set yet';
+  var ranksEl=document.getElementById('guide-live-ranks');
+  if(ranksEl) ranksEl.textContent=(c.ranks&&c.ranks.length)?c.ranks.join(' → '):'none configured yet';
+}
 function renderSettings(){ var s=D.settings,c=D.config; document.getElementById('cfg-pob').value=s.pob||''; document.getElementById('cfg-mission').value=s.mission||''; document.getElementById('cfg-cmd').value=s.commander||''; document.getElementById('cfg-class').value=s.classification||''; document.getElementById('cfg-pp-green').value=(s.ppGreen!=null?s.ppGreen:''); document.getElementById('cfg-pp-yellow').value=(s.ppYellow!=null?s.ppYellow:''); renderTagList('type-tags',c.types,'types'); renderTagList('sector-tags',c.sectors,'sectors'); renderTagList('route-tags',c.routes,'routes'); renderTagList('duty-qual-tags',c.dutyQuals,'dutyQuals'); renderTagList('custom-role-tags',c.customRoles,'customRoles'); document.getElementById('cfg-day-start').value=c.dayNight.start; document.getElementById('cfg-day-end').value=c.dayNight.end; document.getElementById('cfg-admin-night-cap').value=(c.adminNightSentryCap!=null?c.adminNightSentryCap:DEFAULT_ADMIN_NIGHT_SENTRY_CAP); var ddq=c.driverDutyQuota||{sentryDay:0,sentryNight:0,roamingNight:0}; document.getElementById('cfg-driver-sentry-day').value=ddq.sentryDay||0; document.getElementById('cfg-driver-sentry-night').value=ddq.sentryNight||0; document.getElementById('cfg-driver-roaming-night').value=ddq.roamingNight||0; populateDutyQualSelects(); renderSentryPostRows(); renderDutyTypeRows(); renderDutyShiftRows(); renderRankTags(); renderPinStatus(); renderPptList(); }
 function saveDayNight(){
   D.config.dayNight={start:document.getElementById('cfg-day-start').value||'06:00',end:document.getElementById('cfg-day-end').value||'18:00'};
