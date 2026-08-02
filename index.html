@@ -1526,23 +1526,6 @@ body.light-mode ::-webkit-scrollbar-thumb{background:#a8c4ad;}
 <div id="settings" class="section">
   <div class="settings-grid">
   <div class="card">
-    <div class="card-title">Unit Identity</div>
-    <div class="fg"><label class="field-label">POB / Unit Name</label><input type="text" id="cfg-pob" placeholder="e.g. 2nd Battalion"></div>
-    <div class="fg"><label class="field-label">Mission / Operation</label><input type="text" id="cfg-mission" placeholder="e.g. Operation Sangaris"></div>
-    <div class="fg"><label class="field-label">Commander Name &amp; Rank</label><input type="text" id="cfg-cmd" placeholder="e.g. Major J. Doe"></div>
-    <div class="fg"><label class="field-label">Report Classification</label>
-      <select id="cfg-class">
-        <option value="">None</option>
-        <option value="UNCLASSIFIED">UNCLASSIFIED</option>
-        <option value="CONFIDENTIAL">CONFIDENTIAL</option>
-        <option value="RESTRICTED">RESTRICTED</option>
-        <option value="SECRET">SECRET</option>
-      </select>
-    </div>
-    <button class="btn btn-primary btn-full" onclick="saveSettings()">Save Settings</button>
-    <div id="cfg-alert" style="margin-top:8px;"></div>
-  </div>
-  <div class="card">
     <div class="card-title">Patrol Participation Thresholds</div>
     <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">A troop's participation % is their patrol hours since deployment, divided by total unit patrol hours over that same period. Set the cutoffs used to flag status.</p>
     <div class="fr">
@@ -1700,6 +1683,24 @@ body.light-mode ::-webkit-scrollbar-thumb{background:#a8c4ad;}
 
 <div id="system" class="section">
   <div class="settings-grid">
+  <div class="card">
+    <div class="card-title">Unit Identity</div>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">Shared across both Patrol and Duty Management — used on every printed report and the dashboard.</p>
+    <div class="fg"><label class="field-label">POB / Unit Name</label><input type="text" id="cfg-pob" placeholder="e.g. 2nd Battalion"></div>
+    <div class="fg"><label class="field-label">Mission / Operation</label><input type="text" id="cfg-mission" placeholder="e.g. Operation Sangaris"></div>
+    <div class="fg"><label class="field-label">Commander Name &amp; Rank</label><input type="text" id="cfg-cmd" placeholder="e.g. Major J. Doe"></div>
+    <div class="fg"><label class="field-label">Report Classification</label>
+      <select id="cfg-class">
+        <option value="">None</option>
+        <option value="UNCLASSIFIED">UNCLASSIFIED</option>
+        <option value="CONFIDENTIAL">CONFIDENTIAL</option>
+        <option value="RESTRICTED">RESTRICTED</option>
+        <option value="SECRET">SECRET</option>
+      </select>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="saveSettings()">Save Settings</button>
+    <div id="cfg-alert" style="margin-top:8px;"></div>
+  </div>
   <div class="card">
     <div class="card-title">System</div>
     <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">Protected by your Security PIN, if one is set. Shared across both Patrol and Duty Management.</p>
