@@ -3467,11 +3467,24 @@ function isTroopReserved(tid,opts){
 
   if(opts.dutyMode){
     // BUSINESS RULE (confirmed): creating/assigning DUTY (day or night)
-    // reserves a troop for (a) a duty/duty-draft that is ONGOING right
-    // now, (b) any uncompleted patrol draft — patrol created first blocks
-    // duty created after it — and (c) an active Contingency Mode
-    // exclusion.
-    shiftCheckDate=null; checkPeriod=null; // live/ongoing check
+    // reserves a troop for (a) a duty/duty-draft that overlaps the
+    // ACTUAL SHIFT WINDOW being planned for, (b) any uncompleted patrol
+    // draft — patrol created first blocks duty created after it — and
+    // (c) an active Contingency Mode exclusion.
+    // FIX: this used to always force a blunt "right now" live check
+    // regardless of opts.date/opts.shift, so a troop still finishing
+    // today's ongoing Day Duty showed as reserved even when generating
+    // suggestions for that same night's Night Duty — a shift that starts
+    // only after Day Duty has already ended. Now, when a specific
+    // date+shift is being planned for (as Duty Suggestion always passes),
+    // check that shift's real window via targetDate/period instead of
+    // "this exact moment"; only fall back to a live/ongoing check when no
+    // date+shift is given (e.g. an open right-now booking with neither).
+    if(opts.date&&opts.shift){
+      shiftCheckDate=opts.date; checkPeriod=opts.shift;
+    } else {
+      shiftCheckDate=null; checkPeriod=null; // live/ongoing check
+    }
   } else if(opts.patrolMode){
     // BUSINESS RULE (confirmed): Patrol reservation depends on the
     // patrol's date and on when it's being created:
