@@ -6981,21 +6981,27 @@ function shiftsOverlap(aStart,aDur,bStart,bDur){
 function dutyConflict(tid,date,startStr,durHours,excludeDutyId,excludeDutyDraftId,period){
   var duty;
   if(period){
-    // BUSINESS RULE (confirmed): a troop is reserved from being put on
-    // Duty (day or night) only by a duty that is ONGOING right now — i.e.
-    // literally in progress at this exact moment — not by any future or
-    // past-relative-to-now shift, and not by the specific slot being
-    // searched. "Ongoing" still uses each existing duty's real,
-    // midnight-rollover-aware start/end (dutyStartMoment/dutyEndMoment),
-    // so a post-midnight shift is correctly evaluated against "now" even
-    // though it's stamped on the following calendar date.
-    var nowLive=new Date();
+    // FIX: this used to hard-code a "right now, this exact moment" check
+    // regardless of which slot was actually being filled — so generating
+    // tonight's Night Duty during the day saw troops still on today's
+    // ongoing Day Duty as conflicted (blocked) even though Day Duty ends
+    // hours before Night Duty starts. Same bug already fixed in
+    // isTroopReserved()'s dutyMode branch, just living here too since
+    // dsFillPass's basePool() calls dutyConflict() directly. Now: compute
+    // the CANDIDATE slot's own real calendar window (via
+    // dutyRecordCalendarDate for midnight rollover) and check true
+    // time-window overlap against each existing duty's real start/end —
+    // matching the doc comment below, which already described this as
+    // the intended behavior.
+    var slotRealDate=dutyRecordCalendarDate(date,startStr,period);
+    var slotStart=dutyStartMoment({date:slotRealDate,startTime:startStr});
+    var slotEnd=dutyEndMoment({date:slotRealDate,startTime:startStr,durationHours:durHours});
     duty=D.duties.some(function(d){
       if(d.cancelled) return false;
       if(d.id===excludeDutyId) return false;
       if((d.troops||[]).indexOf(tid)<0) return false;
       var dStart=dutyStartMoment(d), dEnd=dutyEndMoment(d);
-      return nowLive>=dStart && nowLive<dEnd;
+      return slotStart<dEnd && dStart<slotEnd;
     });
   } else {
     duty=D.duties.some(function(d){
@@ -7033,6 +7039,10 @@ function dutyConflict(tid,date,startStr,durHours,excludeDutyId,excludeDutyDraftI
   // while still showing up fine for tomorrow.
   var draftDuty;
   if(period){
+    // FIX: this also fell back to a bare "is r happening right now"
+    // check instead of actually comparing r's window against the
+    // candidate slot's window as the comment above always described —
+    // same root cause as the `duty` branch fix above.
     draftDuty=(D.dutyDrafts||[]).some(function(dft){
       if(excludeDutyDraftId&&dft.id===excludeDutyDraftId) return false;
       return (dft.records||[]).some(function(r){
@@ -7040,7 +7050,7 @@ function dutyConflict(tid,date,startStr,durHours,excludeDutyId,excludeDutyDraftI
         var rRealDate=dutyRecordCalendarDate(dft.plannedDate,r.startTime,dft.period);
         var rStart=dutyStartMoment({date:rRealDate,startTime:r.startTime});
         var rEnd=dutyEndMoment({date:rRealDate,startTime:r.startTime,durationHours:r.durationHours});
-        return nowLive>=rStart && nowLive<rEnd;
+        return slotStart<rEnd && rStart<slotEnd;
       });
     });
   } else {
