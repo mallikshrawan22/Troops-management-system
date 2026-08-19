@@ -2176,7 +2176,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       </div>
       <div class="fg" id="stm-officer-wrap"><label class="field-label">Officer (few available — pick manually if needed)</label><select id="stm-officer-pick"></select></div>
       <div class="fr">
-        <div class="fg"><label class="field-label">JCOs Needed (WO1/WO2)</label>
+        <div class="fg"><label class="field-label">JCOs Needed (WO1/WO2/WO)</label>
           <div style="display:flex;align-items:center;gap:6px;">
             <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-jco-count',-1)">−</button>
             <input type="number" id="stm-jco-count" min="0" value="1" style="text-align:center;" oninput="stmUpdateTotal()">
@@ -3015,7 +3015,7 @@ function clearDeactivatedDevices(){
 }
 var APP_VERSION = '2026.07.03.1';
 var SK = 'pob_v4';
-var DEFAULT_RANKS = ['Major','Captain','WO1','WO2','CSM','Sergeant','Corporal','Lance Corporal','Private','NCE'];
+var DEFAULT_RANKS = ['Major','Captain','WO','WO1','WO2','CSM','Sergeant','Corporal','Lance Corporal','Private','NCE'];
 var DEFAULT_ROUTES = ['Main Gate - Market - Base','River Crossing - Perimeter','Airport Road - Town Center','North Perimeter - South Gate'];
 var RANKS = DEFAULT_RANKS.slice();
 var DEFAULT_TYPES = ['Escort','Link-up','FET','Airport Security','FACA Ration Delivery','Security Meeting','Joint Patrol with FACA','SDP','MDP','LDP','Water Distribution','QRF','Recce'];
@@ -7485,7 +7485,7 @@ function dutyTypeByName(name){ return (D.config.dutyTypes||[]).find(function(x){
 function dutyPostById(id){ return (D.config.dutyPosts||[]).find(function(x){return x.id===id;})||null; }
 function isAdminTrade(t){ return t&&(t.trade==='Administration'||t.trade==='POB Commander'||t.dualAdmin); }
 // Roaming eligibility (Duty side only): officers up to Captain, JCOs
-// (WO1/WO2), CSM, and Sergeants specifically flagged as senior — not the
+// (WO1/WO2/WO), CSM, and Sergeants specifically flagged as senior — not the
 // general troop pool. CSM is grouped with JCO/Officer here on purpose:
 // for internal Duty, CSM is Roaming-only just like Officer/JCO. This is
 // separate from the Patrol JCO fairness pool, where CSM must NOT stand
@@ -7495,12 +7495,12 @@ function isRoamingEligible(t){
   if(!t) return false;
   var r=(t.rank||'').toLowerCase();
   if(r.indexOf('major')>=0||r.indexOf('capt')>=0) return true; // officers up to Captain
-  if(r==='wo1'||r==='wo2'||r==='csm') return true; // JCOs + CSM
+  if(r==='wo1'||r==='wo2'||r==='wo'||r==='csm') return true; // JCOs + CSM
   if(r==='sergeant') return !!t.isSeniorSergeant; // only designated senior sergeants
   return false;
 }
 function isRoamingOfficerRank(t){ if(!t) return false; var r=(t.rank||'').toLowerCase(); return r.indexOf('major')>=0||r.indexOf('capt')>=0; }
-function isRoamingJCORank(t){ if(!t) return false; var r=(t.rank||'').toLowerCase(); return r==='wo1'||r==='wo2'||r==='csm'; }
+function isRoamingJCORank(t){ if(!t) return false; var r=(t.rank||'').toLowerCase(); return r==='wo1'||r==='wo2'||r==='wo'||r==='csm'; }
 function isRoamingEligibleSergeant(t){ return !!(t&&(t.rank||'').toLowerCase()==='sergeant'&&t.isSeniorSergeant); }
 function isDutyQualified(t,qualTag){ if(!qualTag) return true; return t&&(t.dutyQuals||[]).indexOf(qualTag)>=0; }
 function lastPostAssignment(tid,postId){
@@ -7690,7 +7690,7 @@ function isDayTime(startStr){
   return m2>=r&&m2<e;
 }
 /* ── OFFICER/JCO CLASSIFICATION & MOST-ACTIVE RANKING ── */
-var OFFICER_JCO_KEYWORDS=['pob commander','commander','major','capt','lt.','lieutenant','wo1','wo2','csm','col','brig','gen'];
+var OFFICER_JCO_KEYWORDS=['pob commander','commander','major','capt','lt.','lieutenant','wo1','wo2','wo','csm','col','brig','gen'];
 function isOfficerOrJCO(rank){ if(!rank) return false; var r=rank.toLowerCase(); return OFFICER_JCO_KEYWORDS.some(function(k){return r.indexOf(k)>=0;}); }
 function allPersonnel(){ return D.troops.concat(D.archived||[]); }
 function personById(id){ return allPersonnel().find(function(p){return p.id===id;}); }
@@ -9033,7 +9033,7 @@ function toggleDriverQuals(){
 function guessCategory(rank){
   var r=(rank||'').toLowerCase();
   if(/major|captain|lieut|colonel|pob commander|general/.test(r)) return 'Officer';
-  if(/\bwo1\b|\bwo2\b|warrant officer/.test(r)) return 'JCO';
+  if(/\bwo1\b|\bwo2\b|\bwo\b|warrant officer/.test(r)) return 'JCO';
   if(r) return 'Other Rank';
   return '';
 }
