@@ -1193,6 +1193,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
         <button class="btn btn-ghost btn-sm" onclick="clearFilters()" style="grid-column:4/5;padding:0 10px;">✕</button>
       </div>
     </div>
+    <div id="dup-patrol-warning" style="display:none;margin-top:10px;"></div>
     <div id="filter-summary" style="display:none;margin-top:10px;" class="alert al-info"></div>
     <div id="patrol-cards"></div>
     <div id="pempty" class="empty" style="display:none;">No records found.</div>
@@ -7221,6 +7222,59 @@ function inactiveThresholdDays(t){ return 7; }
 function lastPatrol(tid){ var pts=D.patrols.filter(function(p){return (p.troops||[]).indexOf(tid)>=0;}); pts.sort(function(a,b){return b.date.localeCompare(a.date);}); return pts.length?pts[0].date:null; }
 function patrolCount(tid){ return D.patrols.filter(function(p){return (p.troops||[]).indexOf(tid)>=0;}).length; }
 function patrolHours(tid){ return D.patrols.filter(function(p){return (p.troops||[]).indexOf(tid)>=0;}).reduce(function(s,p){return s+(parseFloat(p.duration)||0);},0); }
+// Finds patrols that are very likely the SAME real-world patrol logged
+// twice as two separate records — same date, same type, and sharing at
+// least one troop. This happens when a patrol is corrected (wrong hour,
+// wrong troops) by using "+ Log Patrol" again instead of the ✎ Edit
+// button on the existing entry: the fix creates a second row rather than
+// updating the first, so the troop's hours/participation % end up
+// counting the same patrol twice even though the Patrol Log's own count
+// of distinct rows is technically "correct" (two real, distinct rows —
+// just both describing the same event). logPatrol() now blocks new
+// duplicates at creation time (see the confirm() there), but this scan
+// is what surfaces ones that already exist, both in the Patrol Log page
+// and — scoped to one person — on a troop's Profile, so they can
+// actually be found and cleared instead of silently inflating stats.
+function patrolDuplicatePairs(scopeTroopId){
+  var list=D.patrols.slice().sort(function(a,b){return a.date.localeCompare(b.date);});
+  var pairs=[];
+  for(var i=0;i<list.length;i++){
+    for(var j=i+1;j<list.length;j++){
+      var a=list[i],b=list[j];
+      if(a.date!==b.date||a.type!==b.type) continue;
+      var shared=(a.troops||[]).filter(function(tid){return (b.troops||[]).indexOf(tid)>=0;});
+      if(shared.length===0) continue;
+      if(scopeTroopId&&shared.indexOf(scopeTroopId)<0) continue;
+      pairs.push({a:a,b:b,shared:shared});
+    }
+  }
+  return pairs;
+}
+// Renders the "possible duplicate" banner on the Patrol Log page. Each
+// pair gets quick Edit/Delete actions on both sides so the wrong one can
+// be resolved right where it's found, without hunting through the list.
+function renderDuplicateWarnings(){
+  var el=document.getElementById('dup-patrol-warning');
+  if(!el) return;
+  var pairs=patrolDuplicatePairs();
+  if(pairs.length===0){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='';
+  el.innerHTML='<div class="alert al-warn">'+
+    '<div style="font-weight:700;margin-bottom:6px;">⚠ Possible duplicate patrols ('+pairs.length+')</div>'+
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Same date, same type, sharing at least one troop — likely the same patrol logged twice. This inflates hours and participation % for the shared troop(s). Keep the correct one and delete the other.</div>'+
+    pairs.map(function(pr){
+      return '<div style="border-top:1px solid rgba(255,255,255,0.15);padding:8px 0;font-size:12.5px;">'+
+        '<div><strong>'+(pr.a.ptlId||'—')+'</strong> vs <strong>'+(pr.b.ptlId||'—')+'</strong> — '+fmtDate(pr.a.date)+' · '+escHtml(pr.a.type)+'</div>'+
+        '<div style="color:var(--text-muted);margin:2px 0 6px;">Shared: '+pr.shared.map(troopLabel).join(', ')+'</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
+        '<button class="rb-btn rb-info" onclick="editPatrol(\''+pr.a.id+'\')">Edit '+(pr.a.ptlId||'A')+'</button>'+
+        '<button class="rb-btn rb-danger-soft" onclick="confirmDel(\'patrol\',\''+pr.a.id+'\')">Delete '+(pr.a.ptlId||'A')+'</button>'+
+        '<button class="rb-btn rb-info" onclick="editPatrol(\''+pr.b.id+'\')">Edit '+(pr.b.ptlId||'B')+'</button>'+
+        '<button class="rb-btn rb-danger-soft" onclick="confirmDel(\'patrol\',\''+pr.b.id+'\')">Delete '+(pr.b.ptlId||'B')+'</button>'+
+        '</div></div>';
+    }).join('')+
+    '</div>';
+}
 
 /* ── DUTY ROSTER — shift time math, conflicts, eligibility, fairness ── */
 // Single shared "HH:MM" → minutes-since-midnight helper — used by every
@@ -8940,6 +8994,18 @@ function logPatrol(){
     var lpTitle=document.getElementById('log-patrol-modal-title'); if(lpTitle) lpTitle.textContent='Log New Patrol';
   } else {
     var dup=D.patrols.find(function(p){if(p.date!==date||p.type!==type)return false;return (p.troops||[]).some(function(tid){return selectedTroops.indexOf(tid)>=0;});});
+    // Same date, same type, and at least one of the same troops already
+    // has a logged patrol — this is almost always the same patrol being
+    // logged a second time to fix a mistake (wrong hour, wrong troops)
+    // instead of using the ✎ Edit button on the existing entry. Logging
+    // it anyway used to only show a warning AFTER creating a second row,
+    // so the "fix" silently doubled that troop's counted hours and
+    // participation %. Ask first, and default to editing the existing
+    // patrol instead of creating a duplicate.
+    if(dup){
+      var goEdit=confirm('A patrol already exists for this date and type ('+(dup.ptlId||dup.id)+') sharing at least one selected troop — likely the same patrol.\n\nPress OK to edit that existing patrol instead (recommended). Press Cancel to log this as a genuinely separate new patrol anyway.');
+      if(goEdit){ pendingDraftLogId=null; editPatrol(dup.id); return; }
+    }
     var newPatrol={id:uid('p'),ptlSeq:nextPtlSeq(),date:date,type:type,troops:selectedTroops.slice(),duration:dur,area:area,route:route,remarks:rem,commander:selectedCommander||null,commanderAuto:selectedCommander?false:null};
     newPatrol.ptlId=patrolDisplayId(newPatrol);
     var ptlId=newPatrol.ptlId;
@@ -8947,8 +9013,7 @@ function logPatrol(){
     remoteSavePatrol(newPatrol);
     remoteSaveConfig();
     audit('Patrol logged: '+ptlId+' | '+type+' | '+(area||'No sector')+' | '+selectedTroops.length+' troops');
-    if(dup) showAlert('log-alert','Patrol '+ptlId+' logged. WARNING: Possible duplicate.','warn');
-    else showAlert('log-alert','Patrol '+ptlId+' logged successfully!','success');
+    showAlert('log-alert','Patrol '+ptlId+' logged successfully!','success');
     if(pendingDraftLogId){
       D.drafts=D.drafts.filter(function(d){return d.id!==pendingDraftLogId;});
       remoteSaveConfig();
@@ -8982,6 +9047,7 @@ function renderTable(){
   else if(sortMode==='name-asc') rows.sort(function(a,b){return troopNames(a).localeCompare(troopNames(b));});
   else rows.sort(function(a,b){return (b.ptlSeq||0)-(a.ptlSeq||0);});
   document.getElementById('patrol-count-lbl').textContent='('+rows.length+')';
+  renderDuplicateWarnings();
   var summary=document.getElementById('filter-summary');
   if(s&&rows.length>0){ var tH=rows.reduce(function(sum,p){return sum+(parseFloat(p.duration)||0);},0); summary.style.display=''; summary.innerHTML='<strong>'+rows.length+'</strong> patrols · <strong>'+tH.toFixed(1)+'h</strong> total'; } else { summary.style.display='none'; }
   var container=document.getElementById('patrol-cards');
@@ -9347,6 +9413,11 @@ function showProfile(id, fromArch){
   var mo=new Date().getMonth(),yr=new Date().getFullYear();
   var moPats=tp.filter(function(p){var d=new Date(p.date+'T12:00:00');return d.getMonth()===mo&&d.getFullYear()===yr;});
   var moH=moPats.reduce(function(s,p){return s+(parseFloat(p.duration)||0);},0);
+  // Same-patrol-logged-twice check, scoped to this troop — see
+  // patrolDuplicatePairs(). Shown right on the profile because that's
+  // where the symptom actually shows up (hours/participation % look
+  // inflated), even though the underlying rows live in D.patrols.
+  var dupPairs=patrolDuplicatePairs(id);
   // Duty History (item 6) — separate from Patrol History, own stats and
   // its own section below it, each duty shown compact with an expandable
   // detail (date, type, day/night, timing, duration, post are all
@@ -9419,6 +9490,22 @@ function showProfile(id, fromArch){
     '</div>'+
     (sectors.length>0?'<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Sectors: <strong style="color:var(--text);">'+sectors.join(', ')+'</strong></div>':'')+
     (Object.keys(types).length>0?'<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Types: '+Object.entries(types).sort(function(a,b){return b[1]-a[1];}).map(function(kv){return '<span class="badge b-gray" style="margin-right:3px;margin-bottom:3px;">'+kv[0]+': '+kv[1]+'</span>';}).join('')+'</div>':'')+
+    (dupPairs.length?(
+      '<div class="alert al-warn" style="margin-bottom:10px;">'+
+      '<div style="font-weight:700;margin-bottom:4px;">⚠ '+dupPairs.length+' possible duplicate patrol'+(dupPairs.length!==1?'s':'')+'</div>'+
+      '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px;">Same date &amp; type logged twice — this is inflating the hours and % above. Below, this troop is counted on both:</div>'+
+      dupPairs.map(function(pr){
+        return '<div style="border-top:1px solid rgba(255,255,255,0.15);padding:6px 0;font-size:12px;">'+
+          '<div><strong>'+(pr.a.ptlId||'—')+'</strong> vs <strong>'+(pr.b.ptlId||'—')+'</strong> — '+fmtDate(pr.a.date)+' · '+escHtml(pr.a.type)+'</div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">'+
+          '<button class="rb-btn rb-info" onclick="editPatrol(\''+pr.a.id+'\')">Edit '+(pr.a.ptlId||'A')+'</button>'+
+          '<button class="rb-btn rb-danger-soft" onclick="confirmDel(\'patrol\',\''+pr.a.id+'\')">Delete '+(pr.a.ptlId||'A')+'</button>'+
+          '<button class="rb-btn rb-info" onclick="editPatrol(\''+pr.b.id+'\')">Edit '+(pr.b.ptlId||'B')+'</button>'+
+          '<button class="rb-btn rb-danger-soft" onclick="confirmDel(\'patrol\',\''+pr.b.id+'\')">Delete '+(pr.b.ptlId||'B')+'</button>'+
+          '</div></div>';
+      }).join('')+
+      '</div>'
+    ):'')+
     '<div class="section-hdr" style="display:flex;justify-content:space-between;align-items:center;">'+
     '<span>Patrol History ('+tp.length+')</span>'+
     (tp.length?'<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:4px 8px;" onclick="printProfileSection(\''+id+'\',\'patrol\')">🖨 Print</button>':'')+
