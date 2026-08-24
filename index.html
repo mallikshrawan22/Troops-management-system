@@ -7235,6 +7235,21 @@ function patrolHours(tid){ return D.patrols.filter(function(p){return (p.troops|
 // is what surfaces ones that already exist, both in the Patrol Log page
 // and — scoped to one person — on a troop's Profile, so they can
 // actually be found and cleared instead of silently inflating stats.
+// Minimum fraction of the SMALLER patrol's troop list that must overlap
+// before two same-date/same-type patrols count as "likely the same
+// patrol logged twice". Deliberately not "any shared troop" — it's
+// completely normal for a couple of the same people to appear on two
+// genuinely separate patrols of the same type on the same day (e.g. two
+// rotating Escort runs sharing 1-2 troops out of 6). Only flag when MOST
+// of one patrol's people also show up on the other — that's the actual
+// signature of the same event being logged twice.
+var PATROL_DUP_OVERLAP_THRESHOLD=0.6;
+function patrolTroopOverlap(a,b){
+  var aids=a.troops||[], bids=b.troops||[];
+  if(aids.length===0||bids.length===0) return {shared:[],ratio:0};
+  var shared=aids.filter(function(tid){return bids.indexOf(tid)>=0;});
+  return {shared:shared,ratio:shared.length/Math.min(aids.length,bids.length)};
+}
 function patrolDuplicatePairs(scopeTroopId){
   var list=D.patrols.slice().sort(function(a,b){return a.date.localeCompare(b.date);});
   var pairs=[];
@@ -7242,10 +7257,10 @@ function patrolDuplicatePairs(scopeTroopId){
     for(var j=i+1;j<list.length;j++){
       var a=list[i],b=list[j];
       if(a.date!==b.date||a.type!==b.type) continue;
-      var shared=(a.troops||[]).filter(function(tid){return (b.troops||[]).indexOf(tid)>=0;});
-      if(shared.length===0) continue;
-      if(scopeTroopId&&shared.indexOf(scopeTroopId)<0) continue;
-      pairs.push({a:a,b:b,shared:shared});
+      var ov=patrolTroopOverlap(a,b);
+      if(ov.ratio<PATROL_DUP_OVERLAP_THRESHOLD) continue;
+      if(scopeTroopId&&ov.shared.indexOf(scopeTroopId)<0) continue;
+      pairs.push({a:a,b:b,shared:ov.shared});
     }
   }
   return pairs;
@@ -7261,7 +7276,7 @@ function renderDuplicateWarnings(){
   el.style.display='';
   el.innerHTML='<div class="alert al-warn">'+
     '<div style="font-weight:700;margin-bottom:6px;">⚠ Possible duplicate patrols ('+pairs.length+')</div>'+
-    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Same date, same type, sharing at least one troop — likely the same patrol logged twice. This inflates hours and participation % for the shared troop(s). Keep the correct one and delete the other.</div>'+
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Same date, same type, with mostly the same troops — likely the same patrol logged twice. This inflates hours and participation % for the shared troop(s). Keep the correct one and delete the other.</div>'+
     pairs.map(function(pr){
       return '<div style="border-top:1px solid rgba(255,255,255,0.15);padding:8px 0;font-size:12.5px;">'+
         '<div><strong>'+(pr.a.ptlId||'—')+'</strong> vs <strong>'+(pr.b.ptlId||'—')+'</strong> — '+fmtDate(pr.a.date)+' · '+escHtml(pr.a.type)+'</div>'+
@@ -8993,7 +9008,13 @@ function logPatrol(){
     document.getElementById('p-cancel-edit-btn').style.display='none';
     var lpTitle=document.getElementById('log-patrol-modal-title'); if(lpTitle) lpTitle.textContent='Log New Patrol';
   } else {
-    var dup=D.patrols.find(function(p){if(p.date!==date||p.type!==type)return false;return (p.troops||[]).some(function(tid){return selectedTroops.indexOf(tid)>=0;});});
+    // Same majority-overlap rule as patrolDuplicatePairs() — a single
+    // shared troop isn't enough to assume this is the same patrol, since
+    // a couple of the same people legitimately showing up on two separate
+    // same-day, same-type patrols is normal. Only treat it as a likely
+    // duplicate when most of one patrol's troops match the other.
+    var draftPatrol={troops:selectedTroops};
+    var dup=D.patrols.find(function(p){if(p.date!==date||p.type!==type)return false;return patrolTroopOverlap(p,draftPatrol).ratio>=PATROL_DUP_OVERLAP_THRESHOLD;});
     // Same date, same type, and at least one of the same troops already
     // has a logged patrol — this is almost always the same patrol being
     // logged a second time to fix a mistake (wrong hour, wrong troops)
@@ -9003,7 +9024,7 @@ function logPatrol(){
     // participation %. Ask first, and default to editing the existing
     // patrol instead of creating a duplicate.
     if(dup){
-      var goEdit=confirm('A patrol already exists for this date and type ('+(dup.ptlId||dup.id)+') sharing at least one selected troop — likely the same patrol.\n\nPress OK to edit that existing patrol instead (recommended). Press Cancel to log this as a genuinely separate new patrol anyway.');
+      var goEdit=confirm('A patrol already exists for this date and type ('+(dup.ptlId||dup.id)+') with mostly the same troops — likely the same patrol.\n\nPress OK to edit that existing patrol instead (recommended). Press Cancel to log this as a genuinely separate new patrol anyway.');
       if(goEdit){ pendingDraftLogId=null; editPatrol(dup.id); return; }
     }
     var newPatrol={id:uid('p'),ptlSeq:nextPtlSeq(),date:date,type:type,troops:selectedTroops.slice(),duration:dur,area:area,route:route,remarks:rem,commander:selectedCommander||null,commanderAuto:selectedCommander?false:null};
