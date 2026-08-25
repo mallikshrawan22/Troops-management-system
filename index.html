@@ -1248,6 +1248,11 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
         <button class="btn btn-ghost btn-sm" onclick="showTab('troops')">← Roster</button>
       </div>
     </div>
+    <div class="toolbar-box">
+      <div class="fg" style="margin-bottom:0;">
+        <input type="text" id="arch-search" placeholder="🔍 Search name, rank, service no., unit..." oninput="renderArchivedTroops()">
+      </div>
+    </div>
     <div id="archived-list"></div>
   </div>
 </div>
@@ -1958,6 +1963,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <summary>Adding, editing, and archiving a troop</summary>
       <div class="guide-body">
         <p><strong>+ Add Troop</strong> creates a new roster entry. Every field can be edited later from their profile. <strong>Archiving</strong> (rather than deleting) removes someone from active rotation while keeping their full patrol/duty history intact and viewable under Archived — use this for anyone who's left, rather than deleting them outright.</p>
+        <p>If an archived troop is later <strong>unarchived</strong>, the time they spent archived is automatically excluded from their participation % — it's banked the same way a Leave/Sick stretch is, so their standing isn't dragged down by a gap where they weren't on rotation at all, and their participation share effectively restarts fresh from the day they're restored.</p>
         <div class="guide-note">Deleting a troop is permanent and removes their history too. Archiving is almost always what you actually want.</div>
       </div>
     </details>
@@ -7080,12 +7086,16 @@ function dateInIntervals(dateStr,ivs){
 }
 // The precise, dated stretches to exclude from a troop's participation
 // window: every logged Leave/Sick/Absence record (manual, or auto-banked
-// on status flip-back — see the troop-save handler), PLUS, if they're
-// CURRENTLY on Sick/Leave status right now, the still-open stretch from
-// statusSince to today (covers "still out sick, hasn't flipped back
-// yet"). Overlapping ranges — e.g. a status flip logged a few days late,
-// backed up by a more accurate manual entry covering the same period —
-// are merged so nothing is double-excluded or conflicts.
+// on status flip-back — see the troop-save handler), PLUS any archived
+// stretch banked on unarchiveTroop() (start=archivedDate, end=the day
+// they're restored), PLUS, if they're CURRENTLY on Sick/Leave status
+// right now, the still-open stretch from statusSince to today (covers
+// "still out sick, hasn't flipped back yet"). A troop currently archived
+// never reaches this function at all — they've been moved out of
+// D.troops, so they simply don't appear in participation/duty-fairness
+// until restored. Overlapping ranges — e.g. a status flip logged a few
+// days late, backed up by a more accurate manual entry covering the same
+// period — are merged so nothing is double-excluded or conflicts.
 function troopExcludedIntervals(t,todayISO){
   var ivs=[];
   ((t&&t.absences)||[]).forEach(function(a){ if(a&&a.start&&a.end) ivs.push({start:a.start,end:a.end}); });
@@ -9330,10 +9340,25 @@ function unarchiveTroop(id){
   var card=document.getElementById('tc-a-'+id);
   var btnRow=card?card.querySelector('.troop-card-btns'):null;
   if(card){ card.classList.add('tick-active'); if(btnRow) btnRow.innerHTML='<span class="tick-badge">✓ Restored</span>'; }
+  // Bank the just-ended archived stretch as a dated exclusion — same
+  // pattern as the Leave/Sick flip-back banking in the troop-save handler
+  // above. This drops the archived period out of the participation window
+  // precisely by date (via troopExcludedIntervals()/participationStats()),
+  // so time spent archived is never held against them and their
+  // participation % effectively restarts from today, without disturbing
+  // any hours they logged before they were archived.
+  if(t.archivedDate){
+    var absEnd=new Date().toISOString().slice(0,10);
+    if(t.archivedDate<=absEnd){
+      if(!t.absences) t.absences=[];
+      t.absences.push({id:uid('abs'),type:'Archived',start:t.archivedDate,end:absEnd,days:inclusiveDayCount(t.archivedDate,absEnd)});
+    }
+  }
   delete t.archivedDate;
   D.troops.push(t);
   D.archived=D.archived.filter(function(x){return x.id!==id;});
   remoteArchiveTroop(id,false);
+  remoteSaveTroop(t);
   audit('Troop unarchived: '+upLabel(t.rank,t.name));
   if(card){
     setTimeout(function(){ card.classList.add('tick-hide'); },400);
@@ -9403,13 +9428,25 @@ function renderRoster(){
   }).join('');
   el.innerHTML=html;
 }
+// Archived-section search box (simple, single field) — matches name,
+// rank, service number, and unit, same fields the header/print already
+// show for each archived troop. Does not touch arch-count/arch-count-btn,
+// which stay as the true total archived count (used elsewhere, e.g. the
+// "📁 Archived (N) →" button on the Roster page).
 function renderArchivedTroops(){
   var cbtn=document.getElementById('arch-count-btn'); if(cbtn) cbtn.textContent=D.archived.length;
   var chdr=document.getElementById('arch-count'); if(chdr) chdr.textContent=D.archived.length;
   var el=document.getElementById('archived-list');
   if(!el) return;
   if(D.archived.length===0){ el.innerHTML='<div class="empty">No archived troops.</div>'; return; }
-  el.innerHTML=sortTroops(D.archived).map(function(t){
+  var q=(document.getElementById('arch-search')?document.getElementById('arch-search').value:'').toLowerCase().trim();
+  var list=sortTroops(D.archived);
+  if(q) list=list.filter(function(t){
+    var hay=[t.name,t.rank,t.sn,t.unit].join(' ').toLowerCase();
+    return hay.indexOf(q)>=0;
+  });
+  if(list.length===0){ el.innerHTML='<div class="empty">No archived troops match this search.</div>'; return; }
+  el.innerHTML=list.map(function(t){
     return '<div class="troop-card" id="tc-a-'+t.id+'" data-accent="b-gray" style="opacity:0.6;border-style:dashed;">'+
       '<div style="font-size:14px;">'+'<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong> <span class="badge b-archived">Archived</span></div>'+
       '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;">'+(t.unit||'')+(t.archivedDate?' · Archived: '+fmtDateLong(t.archivedDate):'')+' · '+patrolCount(t.id)+' patrols</div>'+

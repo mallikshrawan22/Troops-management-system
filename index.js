@@ -570,7 +570,7 @@ app.post('/troops', async (req, res) => {
     const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
     const absencesArr = Array.isArray(absences) ? absences.filter(a => a && typeof a === 'object' && ISO_DATE.test(a.start) && ISO_DATE.test(a.end)).slice(0, 200).map(a => ({
       id: clip(a.id || '', 60),
-      type: ['Leave', 'Sick', 'Other'].includes(a.type) ? a.type : 'Other',
+      type: ['Leave', 'Sick', 'Other', 'Archived'].includes(a.type) ? a.type : 'Other',
       start: a.start,
       end: a.end,
       days: Number.isFinite(parseInt(a.days)) ? Math.max(1, parseInt(a.days)) : 1
