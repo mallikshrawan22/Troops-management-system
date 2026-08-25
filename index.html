@@ -1892,6 +1892,17 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
     </details>
 
     <details class="guide-item">
+      <summary>Editing a patrol, re-logging, and the duplicate warning</summary>
+      <div class="guide-body">
+        <p>To fix a mistake in an already-logged patrol (wrong hour, wrong troops, wrong area), always use the <strong>✎ Edit</strong> button on that entry in Patrol Log — never re-log it as a new patrol through ⚡ Log Patrol. Editing updates the same record; re-logging creates a second, separate one.</p>
+        <p><strong>Why this matters:</strong> a second record for the same real-world patrol counts that patrol's hours twice for every troop on it — quietly inflating their hours and participation %, even though the Patrol Log itself looks "correct" (two distinct, real rows).</p>
+        <p>The app actively guards against this: if you try to log a new patrol with the <strong>same date, same type, and mostly the same troops</strong> as one already logged, it stops you before creating it and asks whether you meant to edit the existing one instead — that's the recommended choice almost every time. You can still choose to log it as a genuinely separate patrol (e.g. two real Escort runs the same day sharing a couple of troops).</p>
+        <p>If a duplicate slips through anyway (e.g. logged from two devices before sync caught up), a <strong>⚠ Possible duplicate patrols</strong> banner appears at the top of Patrol Log — and on the shared troop's own Profile — listing the pair with quick Edit/Delete on both, so it can be found and cleared instead of silently sitting in the stats.</p>
+        <div class="guide-note">The duplicate check only flags <em>same date + same type + mostly the same troops</em> — it won't catch, and shouldn't catch, two genuinely different patrols that happen to share a date or a troop.</div>
+      </div>
+    </details>
+
+    <details class="guide-item">
       <summary>Patrol Log — editing, deleting, filtering</summary>
       <div class="guide-body">
         <p>Every logged patrol can be edited or deleted from here (PIN required if one is set). Use the filters to narrow by date range, type, or troop — helpful when preparing a report for a specific period rather than scrolling the full history.</p>
@@ -1909,6 +1920,26 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <summary>Participation Status</summary>
       <div class="guide-body">
         <p>Shows every troop's participation percentage — their share of patrol hours against the unit average since their own deployment date, not since the unit started. A troop who joined last month is judged against last month's average, not the whole tour's.</p>
+        <p>Time off is excluded automatically for two of the three cases — no date entry needed:</p>
+        <p><strong>Leave / Sick</strong> — flip Status to Leave or Sick in Edit Troop and save; the app quietly starts the clock. Flip Status back to Available (or anything else) and save, and it automatically banks that exact stretch as a dated exclusion — you never touch a date field for this.</p>
+        <p><strong>Archive / Unarchive</strong> — the day archived to the day unarchived is banked the same way, automatically, the moment you unarchive someone.</p>
+        <p><strong>Manual backfill</strong> — the only time you need the From/To date box yourself: logging time off that happened before it was tracked in the app (e.g. an old leave stretch, or an archive cycle from before this update). Add it directly in Edit Troop → Leave/Sick/Absence Record.</p>
+        <p>All three show up in the same Leave/Sick/Absence Record list on the troop's Edit screen, and every one of them is dropped out of that troop's participation window — so time off never unfairly drags their % down, and it never gets silently missed either.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Hours Ranking vs. Participation Status — which one to use</summary>
+      <div class="guide-body">
+        <p><strong>Participation Status</strong> is the fair one — each troop's hours are judged as a share of the unit's hours over that troop's own eligible window (deployment date onward, minus excluded time). This is the number that should drive fairness decisions.</p>
+        <p><strong>Hours Ranking</strong> is a simple raw-hours leaderboard, with no window adjustment — it's analytical only, useful for a quick "who's logged the most hours overall" view, but it doesn't account for when someone joined or any excluded time, so it shouldn't be used to judge fairness on its own.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Most Active — Monthly History</summary>
+      <div class="guide-body">
+        <p>A month-by-month record of the top-performing troop, based on that month's patrol hours, plus a qualifying Officer/JCO activity note where relevant. Useful for monthly recognition or when writing a handover/command report and you need "who stood out this month" without manually reviewing the whole log.</p>
       </div>
     </details>
 
@@ -1937,6 +1968,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <summary>Duty Roster</summary>
       <div class="guide-body">
         <p>Shows and lets you edit the committed duty roster for a given date — swap troops, mark someone as a replacement, or cancel a slot entirely (cancelled slots are kept in history, not deleted, so the record stays intact).</p>
+        <p>📊 <strong>Fairness List</strong>, on the same page, gives a quick ranked reference of who's most "due" for the next duty assignment, using the same fairness scoring Suggest Duty itself uses — handy when assigning someone manually and you still want to follow the fairness order rather than guessing.</p>
       </div>
     </details>
 
@@ -1963,8 +1995,27 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <summary>Adding, editing, and archiving a troop</summary>
       <div class="guide-body">
         <p><strong>+ Add Troop</strong> creates a new roster entry. Every field can be edited later from their profile. <strong>Archiving</strong> (rather than deleting) removes someone from active rotation while keeping their full patrol/duty history intact and viewable under Archived — use this for anyone who's left, rather than deleting them outright.</p>
-        <p>If an archived troop is later <strong>unarchived</strong>, the time they spent archived is automatically excluded from their participation % — it's banked the same way a Leave/Sick stretch is, so their standing isn't dragged down by a gap where they weren't on rotation at all, and their participation share effectively restarts fresh from the day they're restored.</p>
+        <p>If an archived troop is later <strong>unarchived</strong>, the time they spent archived is automatically excluded from their participation % — see <strong>Participation Status</strong> above (Patrol Mode) for how this and Leave/Sick exclusions work together.</p>
         <div class="guide-note">Deleting a troop is permanent and removes their history too. Archiving is almost always what you actually want.</div>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Eligibility flags on Edit Troop</summary>
+      <div class="guide-body">
+        <p><strong>Never assign to Sentry duty</strong> / <strong>Never suggest (Patrol)</strong> — excludes the troop from Suggest Team / Suggest Duty entirely; they can still be added manually.</p>
+        <p><strong>Restricted range</strong> — flags someone as not suitable for distant patrols (e.g. Armoury Keeper, Storeman). Suggest Team factors this in when picking for far-out patrols.</p>
+        <p><strong>Eligible for Roaming duty</strong> — opt-in flag; only troops with this checked are ever considered for Roaming slots in Suggest Duty.</p>
+        <p><strong>Also Administration/HQ (dual-role)</strong> — keeps their normal Role/trade (e.g. Driver) for patrol eligibility, but applies the Administration Target % and Sentry cap to them too — for someone who's formally on HQ duties but still needs to show up correctly in patrol suggestions.</p>
+        <p><strong>Target %</strong> — the expected participation share for that troop (defaults to 100%, auto-set lower for Administration/POB Commander via the Admin Target % in Settings). The Green/Yellow flagging thresholds on Participation Status scale by this — an Administration troop with a lower Target % isn't flagged the same way a frontline troop falling behind would be.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Blood Donors &amp; Combined Record</summary>
+      <div class="guide-body">
+        <p>🩸 <strong>Donors</strong> (Roster card or Profile) — looks up every troop with a blood group compatible to donate to that troop, useful in a medical emergency without digging through the whole roster by hand.</p>
+        <p>📄 <strong>Combined Record</strong> (Profile) — a single printable/PDF record combining that troop's full Patrol + Duty history, for handovers or personal file requests.</p>
       </div>
     </details>
 
@@ -1972,6 +2023,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <summary>Filter, search, and print the roster</summary>
       <div class="guide-body">
         <p>Search by name, rank, or service number; filter by rank, gender, or eligibility. The <strong>Print</strong> button generates a clean printable roster using whatever filter is currently active.</p>
+        <p>The <strong>Archived</strong> tab has its own simple search box (name, rank, service number, unit) for finding someone in a long archived list without scrolling.</p>
       </div>
     </details>
   </div>
@@ -1991,6 +2043,27 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <summary>Backup &amp; Restore</summary>
       <div class="guide-body">
         <p>Exports your entire dataset — troops, patrols, duties, settings, everything — as a single JSON file you can save anywhere. <strong>Restore</strong> loads one back in, completely replacing what's currently on this device and pushing it to the server. Take a backup before any major change you're unsure about.</p>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Reset All Data (Danger Zone)</summary>
+      <div class="guide-body">
+        <p>Separate from Backup &amp; Restore, and far more destructive — <strong>🗑️ Reset All Data</strong> wipes the shared database and starts fresh, on <strong>every</strong> signed-in device at once, immediately and permanently. Only available from the Main device, and requires the Master Key plus typing "RESET" to confirm.</p>
+        <p>Two scopes: <strong>Operational data only</strong> (troops, patrols, duties, drafts, archived records, audit log — keeps unit settings, types/sectors/posts, and the PIN), or <strong>Everything</strong> (also wipes unit settings, all configuration lists, and the PIN).</p>
+        <div class="guide-note">Always take a backup first. There is no undo.</div>
+      </div>
+    </details>
+
+    <details class="guide-item">
+      <summary>Patrol Types, Sectors, Routes &amp; other configuration lists</summary>
+      <div class="guide-body">
+        <p>Settings holds the tag lists that populate dropdowns everywhere else: <strong>Patrol Types</strong>, <strong>Sectors</strong>, <strong>Routes</strong>, <strong>Duty Qualifications</strong>, and <strong>Additional Troop Roles</strong> (Custom Roles). Add or remove a tag here and it immediately shows up (or disappears) in every relevant dropdown app-wide — nothing is hardcoded.</p>
+        <p><strong>Day/Night window</strong> — the start/end times that define what counts as "day" vs "night" for duty shifts and the Patrol-vs-Duty timing rules.</p>
+        <p><strong>Admin Night Sentry Cap</strong> and <strong>Driver Duty Quota</strong> (per shift type) — caps used by Suggest Duty when filling Sentry/Roaming slots.</p>
+        <p><strong>Admin Target %</strong> — sets the participation share expected of Administration/POB Commander troops; <strong>Apply</strong> pushes it to every troop currently in that category. Individual troops can still be adjusted separately via their own Target % on Edit Troop.</p>
+        <p><strong>Green/Yellow thresholds</strong> — the participation % cutoffs that color troops green/yellow/red on Participation Status.</p>
+        <div class="guide-note">Changes here only affect future suggestions and future flagging — they never rewrite patrols or duties already logged.</div>
       </div>
     </details>
 
@@ -2023,6 +2096,8 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
           <li><strong>Participation Status</strong> — every troop's participation % in table form</li>
           <li><strong>Command Handover</strong> — a snapshot built for handing responsibility to the next commander</li>
           <li><strong>Duty Draft / Patrol Draft</strong> — a proposed (not-yet-logged) team or roster, for review before committing</li>
+          <li><strong>Combined Record</strong> (per-troop, from their Profile) — that individual's full Patrol + Duty history in one printable record</li>
+          <li><strong>Roster / Archived Troops</strong> print — from the Troops and Archived tabs, using whatever filter/search is active at the time</li>
         </ul>
         <p>All of them read Unit Identity from Settings and print with a classification banner if one's set.</p>
       </div>
