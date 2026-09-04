@@ -2320,7 +2320,6 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <div class="stm-section-hdr" style="margin-top:20px;">Special Conditions</div>
       <div class="fg"><label class="cb-wrap" style="font-size:14.5px;line-height:1.4;"><input type="checkbox" id="stm-mechanic-need" onchange="stmUpdateTotal()"><span class="cb-box"></span>Needs Vehicle Mechanic</label></div>
       <div class="fg"><label class="cb-wrap" style="font-size:14.5px;line-height:1.4;"><input type="checkbox" id="stm-long-distance" onchange="stmRefreshOfficerList()"><span class="cb-box"></span>Patrol exceeds restricted range (excludes Restricted-range personnel — e.g. Armoury Keeper, Storeman)</label></div>
-      <div class="fg"><label class="cb-wrap" style="font-size:14.5px;line-height:1.4;"><input type="checkbox" id="stm-admin-override" onchange="stmRefreshOfficerList()"><span class="cb-box"></span>Include Administration/HQ staff (excluded by default, same as Sentry duty — check only if this specific patrol needs one)</label></div>
 
       <div id="stm-total-display" style="margin-top:16px;padding:10px 12px;border-radius:8px;background:var(--surface2);font-size:14px;font-weight:600;text-align:center;"></div>
 
@@ -3971,14 +3970,16 @@ function driverHadNightSentryDayBefore(tid,patrolDateISO){
 // Also excludes pure Administration/POB Commander staff by default (same
 // "last resort only" principle Suggest Duty already applies to Sentry) —
 // otherwise their near-zero duty % puts them at the very front of every
-// duty-%-ranked pool (Officer/JCO/General), so they get suggested for
+// duty-%-ranked pool (Officer/JCO/General), so they'd get suggested for
 // patrol over and over even once their (lower) participation target is
-// already met. includeAdmin (from the "Include Administration/HQ staff"
-// checkbox) opts back in for a patrol that specifically needs one.
-function stmEligibleBase(excludeRestricted,patrolDate,includeAdmin){
+// already met. A dual-role troop with a real trade still patrols normally
+// (see isPureAdminTrade). This exclusion is conditional, not absolute —
+// see stmAdminCandidates/stmAdmitAdmin below for the one case where a
+// pure-admin troop is let back in.
+function stmEligibleBase(excludeRestricted,patrolDate){
   return D.troops.filter(function(t){
     if(!isAvailable(t)||t.neverSuggest) return false;
-    if(!includeAdmin&&isPureAdminTrade(t)) return false;
+    if(isPureAdminTrade(t)) return false;
     if(isTroopReserved(t.id,{date:patrolDate||null,patrolMode:true})) return false;
     if(excludeRestricted&&t.restrictedRange) return false;
     if(patrolDate&&stmDateConflict(t.id,patrolDate)) return false;
@@ -3986,15 +3987,52 @@ function stmEligibleBase(excludeRestricted,patrolDate,includeAdmin){
     return true;
   });
 }
+// Same eligibility checks as stmEligibleBase, but for pure Administration/
+// POB Commander staff specifically (the ones stmEligibleBase excludes).
+// These are candidates only — being on this list does NOT make a troop
+// eligible for suggestion. stmAdmitAdmin decides, per pool, whether any of
+// them actually get let in. No Driver-night-sentry check here: that rule
+// only applies to Driver trade, which a pure-admin troop never has.
+function stmAdminCandidates(excludeRestricted,patrolDate){
+  return D.troops.filter(function(t){
+    if(!isAvailable(t)||t.neverSuggest) return false;
+    if(!isPureAdminTrade(t)) return false;
+    if(isTroopReserved(t.id,{date:patrolDate||null,patrolMode:true})) return false;
+    if(excludeRestricted&&t.restrictedRange) return false;
+    if(patrolDate&&stmDateConflict(t.id,patrolDate)) return false;
+    return true;
+  });
+}
+// Lets an Administration/HQ candidate into a specific pool (Officer, JCO,
+// or General) only when they are MORE overdue on their own (lower) target
+// than the single most-overdue normal troop already in that pool — i.e.
+// their duty-%-of-target ratio is lower than the lowest ratio among the
+// normal troops. This deliberately does not use the pool average: with an
+// average bar, an admin troop would qualify roughly half the time, which
+// defeats the "last resort" principle. Comparing against the most-overdue
+// normal troop means admin/HQ staff only step in when the normal pool is
+// genuinely well-covered and pulling one in won't take time from their
+// actual HQ responsibilities unnecessarily. If the normal pool is empty,
+// there's no one to compare against, so any matching admin candidate is
+// admitted (better than leaving the slot unfillable).
+function stmAdmitAdmin(normalPool,adminCandidatePool,dutyPct){
+  if(!adminCandidatePool.length) return [];
+  if(!normalPool.length) return adminCandidatePool.slice();
+  var mostOverdueRatio=Math.min.apply(null,normalPool.map(function(t){ return dutyPct[t.id]; }));
+  return adminCandidatePool.filter(function(t){ return dutyPct[t.id]<mostOverdueRatio; });
+}
 function stmRank(pool,refDate){
   return pool.slice().sort(function(a,b){ return stmOverdueScore(b,refDate)-stmOverdueScore(a,refDate); }).map(function(t){ return t.id; });
 }
 function stmRefreshOfficerList(){
   var excludeRestricted=document.getElementById('stm-long-distance').checked;
-  var includeAdmin=document.getElementById('stm-admin-override')&&document.getElementById('stm-admin-override').checked;
   var patrolDate=parseDate(document.getElementById('stm-patrol-date').value)||null;
-  var base=stmEligibleBase(excludeRestricted,patrolDate,includeAdmin);
-  var officers=stmRank(base.filter(function(t){ return t.category==='Officer'; }),patrolDate);
+  var base=stmEligibleBase(excludeRestricted,patrolDate);
+  var dutyPct=stmDutyPctMap(patrolDate);
+  var officerNormal=base.filter(function(t){ return t.category==='Officer'; });
+  var officerAdminCand=stmAdminCandidates(excludeRestricted,patrolDate).filter(function(t){ return t.category==='Officer'; });
+  var officerPoolTroops=officerNormal.concat(stmAdmitAdmin(officerNormal,officerAdminCand,dutyPct));
+  var officers=stmRank(officerPoolTroops,patrolDate);
   var sel=document.getElementById('stm-officer-pick');
   var prevVal=sel.value;
   sel.innerHTML='<option value="">-- Most overdue (auto) --</option>'+officers.map(function(id){ var t=troopById(id); return '<option value="'+id+'">'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</option>'; }).join('');
@@ -4046,9 +4084,7 @@ function stmLoadConfig(){
     document.getElementById('stm-mechanic-need').checked=!!cfg.mechanic;
     // Note: long-distance is intentionally NOT restored — it resets fresh
     // each time so a restricted-range exclusion never silently carries
-    // over onto a different, closer patrol. Same reasoning for
-    // stm-admin-override (see stmResetDefaults) — it must not silently
-    // carry over onto a patrol that didn't ask for Admin/HQ staff.
+    // over onto a different, closer patrol.
     document.getElementById('stm-apc').value=cfg.apc!=null?cfg.apc:0;
     document.getElementById('stm-heavy').value=cfg.heavy!=null?cfg.heavy:0;
     document.getElementById('stm-light').value=cfg.light!=null?cfg.light:1;
@@ -4062,7 +4098,6 @@ function stmResetDefaults(){
   document.getElementById('stm-signal-count').value=1;
   document.getElementById('stm-mechanic-need').checked=false;
   document.getElementById('stm-long-distance').checked=false;
-  document.getElementById('stm-admin-override').checked=false;
   document.getElementById('stm-apc').value=0;
   document.getElementById('stm-heavy').value=0;
   document.getElementById('stm-light').value=1;
@@ -4133,11 +4168,10 @@ function stmDutyPctMap(refDate){
 function generateSuggestion(){
   stmSaveConfig(); // remember these values so next time the form opens pre-filled
   var excludeRestricted=document.getElementById('stm-long-distance').checked;
-  var includeAdmin=document.getElementById('stm-admin-override')&&document.getElementById('stm-admin-override').checked;
   var patrolType=document.getElementById('stm-patrol-type').value||'';
   var patrolDate=parseDate(document.getElementById('stm-patrol-date').value)||new Date().toISOString().slice(0,10);
   _stmPatrolType=patrolType; _stmPatrolDateISO=patrolDate;
-  var base=stmEligibleBase(excludeRestricted,patrolDate,includeAdmin);
+  var base=stmEligibleBase(excludeRestricted,patrolDate);
   var officerNeeded=document.getElementById('stm-officer-need').checked;
   var officerPicked=document.getElementById('stm-officer-pick').value;
   var jcoCount=Math.max(0,parseInt(document.getElementById('stm-jco-count').value)||0);
@@ -4155,6 +4189,11 @@ function generateSuggestion(){
   function isFemale(id){ var t=troopById(id); return t&&t.gender==='Female'; }
 
   var dutyPct=stmDutyPctMap(patrolDate);
+  // Administration/HQ candidates for this generation run — not eligible on
+  // their own (see stmEligibleBase), only ever added into a specific pool
+  // below via stmAdmitAdmin when they're more overdue than that pool's
+  // most-overdue normal troop.
+  var adminCandidates=stmAdminCandidates(excludeRestricted,patrolDate);
   // Category-based rotation: lowest duty % first. Ties broken by longest
   // time since last patrol, then name, for a stable, explainable order.
   function rankByDuty(pool){
@@ -4199,13 +4238,17 @@ function generateSuggestion(){
   // Signal, Driver). Each category competes only against itself, ranked
   // strictly by lowest duty %. ─────────────────────────────────────────
   if(officerNeeded){
-    var officerPool=rankByDuty(base.filter(function(t){return t.category==='Officer';}));
+    var officerNormal=base.filter(function(t){return t.category==='Officer';});
+    var officerAdminCand=adminCandidates.filter(function(t){return t.category==='Officer';});
+    var officerPool=rankByDuty(officerNormal.concat(stmAdmitAdmin(officerNormal,officerAdminCand,dutyPct)));
     var chosen=take(officerPool,'Officer',officerPicked||null);
     if(!chosen) warnings.push('No available Officer found.');
   }
 
   // JCO — category 'JCO' already means WO1/WO2 only.
-  var jcoPool=rankByDuty(base.filter(function(t){return t.category==='JCO';}));
+  var jcoNormal=base.filter(function(t){return t.category==='JCO';});
+  var jcoAdminCand=adminCandidates.filter(function(t){return t.category==='JCO';});
+  var jcoPool=rankByDuty(jcoNormal.concat(stmAdmitAdmin(jcoNormal,jcoAdminCand,dutyPct)));
   for(var i=0;i<jcoCount;i++){
     var c=take(jcoPool,'JCO');
     if(!c) warnings.push('No available JCO found for slot '+(i+1)+'.');
@@ -4267,12 +4310,18 @@ function generateSuggestion(){
   //   1 specialist  → general contributes 1 (mandatory) up to 2
   //   2 specialists → general contributes 0 up to 1 (already not alone)
   //   3+ specialists→ general contributes 0 (cap already met/exceeded)
-  var generalPool=base.filter(function(t){
+  var generalNormal=base.filter(function(t){
     if(used[t.id]) return false;
     if(t.category==='Officer'||t.category==='JCO') return false;
     if(t.trade==='Medical'||t.trade==='Signal'||t.trade==='Driver'||t.trade==='Mechanic') return false;
     return true;
   });
+  var generalAdminCand=adminCandidates.filter(function(t){
+    if(used[t.id]) return false;
+    if(t.category==='Officer'||t.category==='JCO') return false;
+    return true;
+  });
+  var generalPool=generalNormal.concat(stmAdmitAdmin(generalNormal,generalAdminCand,dutyPct));
   var genFemaleTroops=generalPool.filter(function(t){return t.gender==='Female';});
   var genMaleTroops=generalPool.filter(function(t){return t.gender!=='Female';});
   var genFemaleRanked=rankByDuty(genFemaleTroops);
