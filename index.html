@@ -7947,9 +7947,19 @@ function rankPersonnel(list){
     return compareSeniority(a.person,b.person);
   });
 }
-/* Compute Most Active Troop + qualifying Officer/JCO Activity Record for a given set of patrols.
-   Troops (non-officer/JCO) are ranked by: hours desc -> count desc -> service number asc.
-   An Officer/JCO is shown only if their hours exceed the winning troop's hours, using the same ranking. */
+// Specialist trades that get pulled onto patrols more consistently than
+// general-duty troops. Kept as one place to edit if the trade list changes.
+var SPECIALIST_TRADES=['Medical','Signal','Driver','Mechanic'];
+function isSpecialistTrade(t){ return t&&SPECIALIST_TRADES.indexOf(t.trade)>=0; }
+/* Compute Most Active Trade Troop, Most Active General Troop, and a qualifying
+   Officer/JCO Activity Record for a given set of patrols.
+   Troops (non-officer/JCO) are split into Trade (Medical/Signal/Driver/Mechanic)
+   and General (everyone else, e.g. trade "General") pools so each pool always
+   has its own winner instead of trade troops (who tend to rack up more patrols)
+   crowding out general troops from the one shared award.
+   Each pool is ranked by: hours desc -> count desc -> service number asc.
+   An Officer/JCO is shown only if their hours exceed the higher of the two
+   pool winners' hours, using the same ranking. */
 function computeMostActive(patrols){
   var stats={};
   patrols.forEach(function(p){
@@ -7961,33 +7971,44 @@ function computeMostActive(patrols){
     });
   });
   var all=Object.keys(stats).map(function(k){return {person:stats[k].person,hours:stats[k].hours,count:stats[k].count,sn:stats[k].person.sn};});
-  var troopsOnly=rankPersonnel(all.filter(function(x){return !isOfficerOrJCO(x.person.rank);}));
+  var troopsOnly=all.filter(function(x){return !isOfficerOrJCO(x.person.rank);});
+  var tradeOnly=rankPersonnel(troopsOnly.filter(function(x){return isSpecialistTrade(x.person);}));
+  var generalOnly=rankPersonnel(troopsOnly.filter(function(x){return !isSpecialistTrade(x.person);}));
   var officersOnly=all.filter(function(x){return isOfficerOrJCO(x.person.rank);});
-  var winner=troopsOnly[0]||null;
+  var tradeWinner=tradeOnly[0]||null;
+  var generalWinner=generalOnly[0]||null;
   var officerRecord=null;
-  if(winner){
-    var qualifying=officersOnly.filter(function(x){return x.hours>winner.hours;});
+  var topTroopHours=Math.max(tradeWinner?tradeWinner.hours:0,generalWinner?generalWinner.hours:0);
+  if(tradeWinner||generalWinner){
+    var qualifying=officersOnly.filter(function(x){return x.hours>topTroopHours;});
     officerRecord=rankPersonnel(qualifying)[0]||null;
   }
-  return {winner:winner,officerRecord:officerRecord};
+  return {tradeWinner:tradeWinner,generalWinner:generalWinner,officerRecord:officerRecord};
+}
+function mostActiveWinnerRowHTML(label,w){
+  if(!w){
+    return '<div style="color:var(--text);">⭐ '+label+': <span style="opacity:0.7;">No data yet</span></div>';
+  }
+  return '<div style="color:var(--tan);font-weight:700;">⭐ '+label+': <strong style="color:#1a1206;background:var(--tan);padding:1px 7px;border-radius:5px;text-transform:uppercase;letter-spacing:0.3px;">'+upLabel(w.person.rank,w.person.name)+'</strong></div>'+
+    '<div style="color:var(--text-muted);margin-top:2px;">'+w.hours.toFixed(1)+'h | '+w.count+' patrols</div>';
 }
 function mostActiveBlockHTML(patrols,historyMode){
   var res=computeMostActive(patrols);
   var histBtn=historyMode?'':'<button class="btn btn-info btn-sm btn-print" onclick="showTab(\'history\')">📜 History</button>';
-  if(!res.winner){
+  if(!res.tradeWinner&&!res.generalWinner){
     if(historyMode) return '<div style="color:var(--text-muted);font-size:12px;">No data</div>';
     return '<div style="margin-top:12px;padding:10px;background:rgba(230,179,74,0.08);border:1px solid rgba(230,179,74,0.2);border-radius:8px;font-size:13px;">'+
       '<div style="color:var(--text);">⭐ Most Active: <span style="opacity:0.7;">No data yet</span></div>'+
       (histBtn?'<div style="display:flex;justify-content:flex-end;margin-top:4px;">'+histBtn+'</div>':'')+'</div>';
   }
-  var w=res.winner;
   var topMargin=historyMode?'0':'12px';
   var html='<div style="margin-top:'+topMargin+';padding:10px;background:rgba(230,179,74,0.08);border:1px solid rgba(230,179,74,0.2);border-radius:8px;font-size:13px;">'+
-    '<div style="color:var(--tan);font-weight:700;">⭐ Most Active: <strong style="color:#1a1206;background:var(--tan);padding:1px 7px;border-radius:5px;text-transform:uppercase;letter-spacing:0.3px;">'+upLabel(w.person.rank,w.person.name)+'</strong></div>'+
-    '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;">'+
-    '<div style="color:var(--text-muted);flex:1;min-width:0;">'+w.hours.toFixed(1)+'h | '+w.count+' patrols</div>'+
-    histBtn+
-    '</div></div>';
+    mostActiveWinnerRowHTML('Most Active (Trade)',res.tradeWinner)+
+    '<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(230,179,74,0.25);">'+
+    mostActiveWinnerRowHTML('Most Active (General)',res.generalWinner)+
+    '</div>'+
+    (histBtn?'<div style="display:flex;justify-content:flex-end;margin-top:6px;">'+histBtn+'</div>':'')+
+    '</div>';
   if(res.officerRecord){
     var o=res.officerRecord;
     html+='<div style="margin-top:8px;padding:10px;background:rgba(120,150,220,0.08);border:1px solid rgba(120,150,220,0.2);border-radius:8px;font-size:13px;">'+
