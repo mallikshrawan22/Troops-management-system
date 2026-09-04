@@ -4090,10 +4090,29 @@ function stmDutyPctMap(refDate){
   // their own effective deployment date, divided by total unit patrol
   // hours over that same window. This is the "duty percentage" used for
   // rotation — lower % means less-used and more due for selection.
+  //
+  // FIX: this used to compare that raw share directly across every troop
+  // regardless of their own Target %. A troop with a lower Target % (mainly
+  // Administration/HQ, whose expected participation is deliberately set
+  // low via Settings → Admin Target %) will always have a tiny raw share
+  // simply because they're SUPPOSED to patrol rarely — so on a straight
+  // raw-% comparison they permanently looked like the "least used" troop
+  // in every pool and kept floating back to the top of the rotation, even
+  // once they'd already met or exceeded their own lower target. This is
+  // the same fault already fixed on the Duty side (dutyFairnessScore's
+  // isAdminTrade branch), generalized here instead of special-cased: every
+  // troop is now ranked by their share AS A PERCENTAGE OF THEIR OWN
+  // TARGET — 100 means "exactly on their own target", below 100 still
+  // due, above 100 already ahead of it — so a 25%-target Administration
+  // troop sitting at 20% (80% of their target) ranks the same as a
+  // 100%-target frontline troop sitting at 80%, instead of automatically
+  // outranking (and getting suggested ahead of) them.
   var todayISO=refDate||new Date().toISOString().slice(0,10);
   var map={};
   D.troops.forEach(function(t){
-    map[t.id]=participationStats(t,D.patrols,{todayISO:todayISO}).pct;
+    var pct=participationStats(t,D.patrols,{todayISO:todayISO}).pct;
+    var target=Math.max(t.targetPct!=null?t.targetPct:100,1);
+    map[t.id]=pct/target*100;
   });
   return map;
 }
