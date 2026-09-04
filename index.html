@@ -1623,6 +1623,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
     <div class="card-title">Administration/HQ on Sentry</div>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Administration/HQ staff are always a last resort for Sentry — pulled in only once the regular troop pool is exhausted. By day that stays absolute. By night, cap how many Administration/HQ troops can appear on a single night's Sentry roster, so a manpower shortage doesn't fill the whole roster with them.</div>
     <div class="fg" style="max-width:200px;"><label class="field-label">Max Admin/HQ on Night Sentry</label><input type="number" id="cfg-admin-night-cap" min="0" max="20" onchange="saveAdminNightCap()"></div>
+    <div class="fg" style="max-width:220px;"><label class="field-label">Min Rest Days Between Patrols</label><input type="number" id="cfg-min-patrol-rest" min="0" max="30" onchange="saveMinPatrolRestDays()"></div>
   </div>
   <div class="card">
     <div class="card-title">Drivers on Duty</div>
@@ -2943,7 +2944,7 @@ function wipeLocalData(){
   clearSession();
   D.troops=[]; D.patrols=[]; D.archived=[]; D.counter=1; D.audit=[];
   D.settings={pob:'',mission:'',commander:'',classification:'CONFIDENTIAL',lastBackupDate:null};
-  D.config={types:DEFAULT_TYPES.slice(),sectors:DEFAULT_SECTORS.slice(),routes:DEFAULT_ROUTES.slice(),ranks:DEFAULT_RANKS.slice(),dutyShifts:DEFAULT_DUTY_SHIFTS.map(function(s){return Object.assign({},s);}),dutyPosts:DEFAULT_DUTY_POSTS.map(function(p){return Object.assign({},p);}),dutyQuals:DEFAULT_DUTY_QUALS.slice(),dutyTypes:DEFAULT_DUTY_TYPES.map(function(t){return Object.assign({},t);}),dayNight:Object.assign({},DEFAULT_DAY_NIGHT),customRoles:[],shiftPreset:Object.assign({},DEFAULT_SHIFT_PRESET),adminNightSentryCap:DEFAULT_ADMIN_NIGHT_SENTRY_CAP,driverDutyQuota:{sentryDay:0,sentryNight:0,roamingNight:0}};
+  D.config={types:DEFAULT_TYPES.slice(),sectors:DEFAULT_SECTORS.slice(),routes:DEFAULT_ROUTES.slice(),ranks:DEFAULT_RANKS.slice(),dutyShifts:DEFAULT_DUTY_SHIFTS.map(function(s){return Object.assign({},s);}),dutyPosts:DEFAULT_DUTY_POSTS.map(function(p){return Object.assign({},p);}),dutyQuals:DEFAULT_DUTY_QUALS.slice(),dutyTypes:DEFAULT_DUTY_TYPES.map(function(t){return Object.assign({},t);}),dayNight:Object.assign({},DEFAULT_DAY_NIGHT),customRoles:[],shiftPreset:Object.assign({},DEFAULT_SHIFT_PRESET),adminNightSentryCap:DEFAULT_ADMIN_NIGHT_SENTRY_CAP,minPatrolRestDays:DEFAULT_MIN_PATROL_REST_DAYS,driverDutyQuota:{sentryDay:0,sentryNight:0,roamingNight:0}};
   D.security={pinHash:'',securityQ:'',securityAHash:''};
   D.drafts=[]; D.duties=[]; D.dutyCounter=1; D.dutyContingency=[]; D.dutyDrafts=[];
 }
@@ -3139,11 +3140,16 @@ var SHIFT_PRESETS = {
 };
 var DEFAULT_SHIFT_PRESET = {day:3,night:3};
 var DEFAULT_ADMIN_NIGHT_SENTRY_CAP = 2;
+// Minimum days a troop must rest before being re-suggested for another
+// patrol, regardless of how low their participation % is. Stops the same
+// couple of overdue troops streaking across back-to-back suggestions; see
+// stmEligibleRestedPool / rankByDuty in the Suggest Patrol Team engine.
+var DEFAULT_MIN_PATROL_REST_DAYS = 3;
 
 var D = {
   troops:[], patrols:[], archived:[], counter:1, audit:[],
   settings:{pob:'',mission:'',commander:'',classification:'CONFIDENTIAL',lastBackupDate:null},
-  config:{types:DEFAULT_TYPES.slice(),sectors:DEFAULT_SECTORS.slice(),routes:DEFAULT_ROUTES.slice(),ranks:DEFAULT_RANKS.slice(),dutyShifts:DEFAULT_DUTY_SHIFTS.map(function(s){return Object.assign({},s);}),dutyPosts:DEFAULT_DUTY_POSTS.map(function(p){return Object.assign({},p);}),dutyQuals:DEFAULT_DUTY_QUALS.slice(),dutyTypes:DEFAULT_DUTY_TYPES.map(function(t){return Object.assign({},t);}),dayNight:Object.assign({},DEFAULT_DAY_NIGHT),customRoles:[],shiftPreset:Object.assign({},DEFAULT_SHIFT_PRESET),adminNightSentryCap:DEFAULT_ADMIN_NIGHT_SENTRY_CAP,driverDutyQuota:{sentryDay:0,sentryNight:0,roamingNight:0}},
+  config:{types:DEFAULT_TYPES.slice(),sectors:DEFAULT_SECTORS.slice(),routes:DEFAULT_ROUTES.slice(),ranks:DEFAULT_RANKS.slice(),dutyShifts:DEFAULT_DUTY_SHIFTS.map(function(s){return Object.assign({},s);}),dutyPosts:DEFAULT_DUTY_POSTS.map(function(p){return Object.assign({},p);}),dutyQuals:DEFAULT_DUTY_QUALS.slice(),dutyTypes:DEFAULT_DUTY_TYPES.map(function(t){return Object.assign({},t);}),dayNight:Object.assign({},DEFAULT_DAY_NIGHT),customRoles:[],shiftPreset:Object.assign({},DEFAULT_SHIFT_PRESET),adminNightSentryCap:DEFAULT_ADMIN_NIGHT_SENTRY_CAP,minPatrolRestDays:DEFAULT_MIN_PATROL_REST_DAYS,driverDutyQuota:{sentryDay:0,sentryNight:0,roamingNight:0}},
   security:{pinHash:'',securityQ:'',securityAHash:''},
   drafts:[], duties:[], dutyCounter:1, dutyContingency:[], dutyDrafts:[]
 };
@@ -3167,6 +3173,7 @@ function migrateDutySystem(){
   if(D.config.shiftPreset.day!==3&&D.config.shiftPreset.day!==4) D.config.shiftPreset.day=DEFAULT_SHIFT_PRESET.day;
   if(D.config.shiftPreset.night!==3&&D.config.shiftPreset.night!==4) D.config.shiftPreset.night=DEFAULT_SHIFT_PRESET.night;
   if(D.config.adminNightSentryCap==null||isNaN(D.config.adminNightSentryCap)) D.config.adminNightSentryCap=DEFAULT_ADMIN_NIGHT_SENTRY_CAP;
+  if(D.config.minPatrolRestDays==null||isNaN(D.config.minPatrolRestDays)) D.config.minPatrolRestDays=DEFAULT_MIN_PATROL_REST_DAYS;
   if(!D.config.driverDutyQuota) D.config.driverDutyQuota={sentryDay:0,sentryNight:0,roamingNight:0};
   D.config.driverDutyQuota.sentryDay=D.config.driverDutyQuota.sentryDay||0;
   D.config.driverDutyQuota.sentryNight=D.config.driverDutyQuota.sentryNight||0;
@@ -4194,16 +4201,30 @@ function generateSuggestion(){
   // below via stmAdmitAdmin when they're more overdue than that pool's
   // most-overdue normal troop.
   var adminCandidates=stmAdminCandidates(excludeRestricted,patrolDate);
+  // Minimum rest days: a troop resting less than this many days since their
+  // last patrol is pushed to the bottom of every pool they're ranked in,
+  // rather than being excluded outright. This means take() only reaches a
+  // still-resting troop once every rested candidate in that pool/role has
+  // already been used — an automatic, per-role "last resort" relaxation, so
+  // a role is never left unfillable just because everyone eligible is still
+  // resting. Any troop who does get pulled in this way is flagged in
+  // stmRestWarnings() below so it's never silent.
+  var minRestDays=(D.config.minPatrolRestDays!=null)?D.config.minPatrolRestDays:DEFAULT_MIN_PATROL_REST_DAYS;
+  function isRested(id){ return !minRestDays || daysSince(lastPatrol(id),patrolDate)>=minRestDays; }
   // Category-based rotation: lowest duty % first. Ties broken by longest
   // time since last patrol, then name, for a stable, explainable order.
+  // Rested troops are ranked ahead of still-resting ones (see isRested).
   function rankByDuty(pool){
-    return pool.slice().sort(function(a,b){
+    function byFairness(a,b){
       var d=dutyPct[a.id]-dutyPct[b.id];
       if(d!==0) return d;
       var ds=daysSince(lastPatrol(b.id),patrolDate)-daysSince(lastPatrol(a.id),patrolDate);
       if(ds!==0) return ds;
       return (a.name||'').localeCompare(b.name||'');
-    }).map(function(t){ return t.id; });
+    }
+    var rested=pool.filter(function(t){ return isRested(t.id); }).sort(byFairness);
+    var resting=pool.filter(function(t){ return !isRested(t.id); }).sort(byFairness);
+    return rested.concat(resting).map(function(t){ return t.id; });
   }
 
   var FEMALE_CAP=3; // total female-quota ceiling for the whole patrol
@@ -4445,6 +4466,17 @@ function generateSuggestion(){
   othersChosen.forEach(function(id){ if(isFemale(id)) femaleCount++; slots.push({role:'Other Rank',chosenId:id,pool:generalPoolRankedFull,poolPos:generalPoolRankedFull.indexOf(id)}); });
   if(othersChosen.length<requestedOthers) warnings.push('Only '+othersChosen.length+' of '+requestedOthers+' "Others" seats could be filled — not enough available troops left.');
   if(femaleCount>FEMALE_CAP) warnings.push('This patrol has '+femaleCount+' female troops, above the cap of '+FEMALE_CAP+'. This means a category rotation (Officer/JCO/Medical/Signal/Driver) had NO non-female alternative available for a role — the cap was intentionally not enforced there so the role wasn\'t left unfilled. Review before deploying.');
+
+  if(minRestDays){
+    slots.forEach(function(s){
+      if(!s.chosenId) return;
+      var d=daysSince(lastPatrol(s.chosenId),patrolDate);
+      if(d<minRestDays){
+        var t=troopById(s.chosenId);
+        warnings.push('⏱ '+t.rank.toUpperCase()+' '+t.name.toUpperCase()+' patrolled '+d+' day(s) ago — below the '+minRestDays+'-day minimum rest, but no rested alternative was left for '+s.role+'.');
+      }
+    });
+  }
 
   _stmSlots=slots;
   renderStmResults(warnings);
@@ -8248,7 +8280,7 @@ function renderUserGuide(){
   var ranksEl=document.getElementById('guide-live-ranks');
   if(ranksEl) ranksEl.textContent=(c.ranks&&c.ranks.length)?c.ranks.join(' → '):'none configured yet';
 }
-function renderSettings(){ var s=D.settings,c=D.config; document.getElementById('cfg-pob').value=s.pob||''; document.getElementById('cfg-mission').value=s.mission||''; document.getElementById('cfg-cmd').value=s.commander||''; document.getElementById('cfg-class').value=s.classification||''; document.getElementById('cfg-pp-green').value=(s.ppGreen!=null?s.ppGreen:''); document.getElementById('cfg-pp-yellow').value=(s.ppYellow!=null?s.ppYellow:''); renderTagList('type-tags',c.types,'types'); renderTagList('sector-tags',c.sectors,'sectors'); renderTagList('route-tags',c.routes,'routes'); renderTagList('duty-qual-tags',c.dutyQuals,'dutyQuals'); renderTagList('custom-role-tags',c.customRoles,'customRoles'); document.getElementById('cfg-day-start').value=c.dayNight.start; document.getElementById('cfg-day-end').value=c.dayNight.end; document.getElementById('cfg-admin-night-cap').value=(c.adminNightSentryCap!=null?c.adminNightSentryCap:DEFAULT_ADMIN_NIGHT_SENTRY_CAP); var ddq=c.driverDutyQuota||{sentryDay:0,sentryNight:0,roamingNight:0}; document.getElementById('cfg-driver-sentry-day').value=ddq.sentryDay||0; document.getElementById('cfg-driver-sentry-night').value=ddq.sentryNight||0; document.getElementById('cfg-driver-roaming-night').value=ddq.roamingNight||0; populateDutyQualSelects(); renderSentryPostRows(); renderDutyTypeRows(); renderDutyShiftRows(); renderRankTags(); renderPinStatus(); renderPptList(); }
+function renderSettings(){ var s=D.settings,c=D.config; document.getElementById('cfg-pob').value=s.pob||''; document.getElementById('cfg-mission').value=s.mission||''; document.getElementById('cfg-cmd').value=s.commander||''; document.getElementById('cfg-class').value=s.classification||''; document.getElementById('cfg-pp-green').value=(s.ppGreen!=null?s.ppGreen:''); document.getElementById('cfg-pp-yellow').value=(s.ppYellow!=null?s.ppYellow:''); renderTagList('type-tags',c.types,'types'); renderTagList('sector-tags',c.sectors,'sectors'); renderTagList('route-tags',c.routes,'routes'); renderTagList('duty-qual-tags',c.dutyQuals,'dutyQuals'); renderTagList('custom-role-tags',c.customRoles,'customRoles'); document.getElementById('cfg-day-start').value=c.dayNight.start; document.getElementById('cfg-day-end').value=c.dayNight.end; document.getElementById('cfg-admin-night-cap').value=(c.adminNightSentryCap!=null?c.adminNightSentryCap:DEFAULT_ADMIN_NIGHT_SENTRY_CAP); document.getElementById('cfg-min-patrol-rest').value=(c.minPatrolRestDays!=null?c.minPatrolRestDays:DEFAULT_MIN_PATROL_REST_DAYS); var ddq=c.driverDutyQuota||{sentryDay:0,sentryNight:0,roamingNight:0}; document.getElementById('cfg-driver-sentry-day').value=ddq.sentryDay||0; document.getElementById('cfg-driver-sentry-night').value=ddq.sentryNight||0; document.getElementById('cfg-driver-roaming-night').value=ddq.roamingNight||0; populateDutyQualSelects(); renderSentryPostRows(); renderDutyTypeRows(); renderDutyShiftRows(); renderRankTags(); renderPinStatus(); renderPptList(); }
 function saveDayNight(){
   D.config.dayNight={start:document.getElementById('cfg-day-start').value||'06:00',end:document.getElementById('cfg-day-end').value||'18:00'};
   remoteSaveConfig();
@@ -8262,6 +8294,14 @@ function saveAdminNightCap(){
   document.getElementById('cfg-admin-night-cap').value=v;
   remoteSaveConfig();
   audit('Max Administration/HQ on Night Sentry updated: '+v);
+}
+function saveMinPatrolRestDays(){
+  var v=parseInt(document.getElementById('cfg-min-patrol-rest').value);
+  if(isNaN(v)||v<0) v=DEFAULT_MIN_PATROL_REST_DAYS;
+  D.config.minPatrolRestDays=v;
+  document.getElementById('cfg-min-patrol-rest').value=v;
+  remoteSaveConfig();
+  audit('Minimum rest days between patrols updated: '+v);
 }
 function saveDriverDutyQuota(){
   function readVal(id){ var v=parseInt(document.getElementById(id).value); return (isNaN(v)||v<0)?0:v; }
