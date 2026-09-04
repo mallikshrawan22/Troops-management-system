@@ -1583,6 +1583,11 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
     <div id="admin-pct-alert" style="margin-top:8px;"></div>
   </div>
   <div class="card">
+    <div class="card-title">Patrol Rest Days</div>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">Minimum number of days a troop must rest before being suggested for another patrol. Set to 0 to disable — troops can then be picked for a patrol the very next day.</p>
+    <div class="fg" style="max-width:220px;"><label class="field-label">Min Rest Days Between Patrols</label><input type="number" id="cfg-min-patrol-rest" min="0" max="30" onchange="saveMinPatrolRestDays()"></div>
+  </div>
+  <div class="card">
     <div class="card-title">Patrol Types</div>
     <div style="display:flex;gap:8px;margin-bottom:8px;">
       <input type="text" id="new-type" placeholder="Add patrol type..." style="flex:1;">
@@ -1623,7 +1628,6 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
     <div class="card-title">Administration/HQ on Sentry</div>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Administration/HQ staff are always a last resort for Sentry — pulled in only once the regular troop pool is exhausted. By day that stays absolute. By night, cap how many Administration/HQ troops can appear on a single night's Sentry roster, so a manpower shortage doesn't fill the whole roster with them.</div>
     <div class="fg" style="max-width:200px;"><label class="field-label">Max Admin/HQ on Night Sentry</label><input type="number" id="cfg-admin-night-cap" min="0" max="20" onchange="saveAdminNightCap()"></div>
-    <div class="fg" style="max-width:220px;"><label class="field-label">Min Rest Days Between Patrols</label><input type="number" id="cfg-min-patrol-rest" min="0" max="30" onchange="saveMinPatrolRestDays()"></div>
   </div>
   <div class="card">
     <div class="card-title">Drivers on Duty</div>
@@ -3144,7 +3148,7 @@ var DEFAULT_ADMIN_NIGHT_SENTRY_CAP = 2;
 // patrol, regardless of how low their participation % is. Stops the same
 // couple of overdue troops streaking across back-to-back suggestions; see
 // stmEligibleRestedPool / rankByDuty in the Suggest Patrol Team engine.
-var DEFAULT_MIN_PATROL_REST_DAYS = 3;
+var DEFAULT_MIN_PATROL_REST_DAYS = 0;
 
 var D = {
   troops:[], patrols:[], archived:[], counter:1, audit:[],
