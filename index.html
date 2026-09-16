@@ -5330,6 +5330,29 @@ function openDutySuggestModal(){
   dsScrollTop();
 }
 function closeDutySuggestModal(){ document.getElementById('duty-suggest-modal').classList.remove('open'); _dsManualPickSlot=-1; var rp=document.getElementById('ds-remaining-troops'); if(rp) rp.style.display='none'; }
+// Permanently deletes EVERY logged duty entry (every post, Roaming, Line
+// Duty — the whole shift) for the given date+period, in one click —
+// instead of opening and deleting each entry one by one. Lives as a
+// small action on each shift card in Duty Roster/History. Grouping uses
+// the same logical-date + day/night rule as everywhere else
+// (dutyDisplayDate + isDayTime), so "this shift" matches what's shown on
+// the card. This is a hard delete like the single-entry Delete button (no
+// audit trail row survives) — unlike Cancel, which keeps the record.
+function deleteWholeShiftDuty(date,period){
+  var matches=D.duties.filter(function(d){
+    return dutyDisplayDate(d)===date && (isDayTime(d.startTime)?'day':'night')===period;
+  });
+  if(matches.length===0){ alert('No duty logged for '+(period==='day'?'Day':'Night')+' · '+fmtDate(date)+'.'); return; }
+  var troopCount=matches.reduce(function(n,d){return n+(d.troops||[]).length;},0);
+  if(!confirm('Permanently delete ALL '+matches.length+' duty entr'+(matches.length===1?'y':'ies')+' ('+troopCount+' troop assignment(s)) logged for '+(period==='day'?'☀ Day':'🌙 Night')+' duty on '+fmtDate(date)+'? This cannot be undone.')) return;
+  var ids=matches.map(function(d){return d.id;});
+  D.duties=D.duties.filter(function(d){return ids.indexOf(d.id)<0;});
+  ids.forEach(function(id){ remoteDeleteDuty(id); });
+  audit('Whole shift duty deleted: '+(period==='day'?'Day':'Night')+' · '+date+' · '+matches.length+' entries');
+  renderDutyPage(); renderDutyDashboard(); updateTodayDutyWidget();
+  if(document.getElementById('dh-search')) renderDutyHistoryList();
+  updateDutyDraftsBadge();
+}
 function dsBackToConfig(){ document.getElementById('ds-config').style.display=''; document.getElementById('ds-results').style.display='none'; dsScrollTop(); _dsManualPickSlot=-1; var rp=document.getElementById('ds-remaining-troops'); if(rp) rp.style.display='none'; }
 // Day duty is Sentry posts only. Night duty is Sentry + Roaming + Line
 // Duty (evening/night activities). Continuous posts (Signal/Medical) span
@@ -6047,12 +6070,20 @@ function dsDeleteSlot(i){
   renderDsResults();
 }
 function dsSlotsToDutyRecords(){
-  return _dsSlots.filter(function(s){return s.chosenId;}).reduce(function(acc,s){
+  // NOTE: vacant slots (chosenId cleared via 🗑 Delete, never re-filled) are
+  // intentionally KEPT here as a null entry in troops[], not dropped. If we
+  // drop them, the slot itself — its post/time/category — never gets saved
+  // into the draft, so re-opening the draft (editDutyDraft) has no record to
+  // rebuild that empty seat from and it simply vanishes, along with any
+  // later attempt to place a different name into "that seat". Consumers
+  // that actually log a duty entry (logDutySuggestNow, logDutyDraftNow)
+  // are responsible for filtering the null placeholders back out.
+  return _dsSlots.reduce(function(acc,s){
     // Merge same post+time into one duty record with multiple troops
     var key=s.category+'|'+(s.postId||'')+'|'+s.startTime+'|'+s.durationHours;
     var existing=acc.find(function(r){return r._key===key;});
-    if(existing){ existing.troops.push(s.chosenId); }
-    else { acc.push({_key:key,category:s.category,postId:s.postId,postName:s.postName,startTime:s.startTime,durationHours:s.durationHours,troops:[s.chosenId],roamingRole:s.roamingRole||null,shiftIdx:(s.shiftIdx!=null?s.shiftIdx:null),shiftIdxCount:(s.shiftIdxCount!=null?s.shiftIdxCount:null)}); }
+    if(existing){ existing.troops.push(s.chosenId||null); }
+    else { acc.push({_key:key,category:s.category,postId:s.postId,postName:s.postName,startTime:s.startTime,durationHours:s.durationHours,troops:[s.chosenId||null],roamingRole:s.roamingRole||null,shiftIdx:(s.shiftIdx!=null?s.shiftIdx:null),shiftIdxCount:(s.shiftIdxCount!=null?s.shiftIdxCount:null)}); }
     return acc;
   },[]);
 }
@@ -6072,14 +6103,20 @@ function saveDutySuggestAsDraft(){
 }
 function logDutySuggestNow(){
   var records=dsSlotsToDutyRecords();
-  if(records.length===0){ showAlert('ds-warnings','Nothing to log — no troops suggested.','danger'); return; }
+  var vacantSlots=records.reduce(function(n,r){return n+r.troops.filter(function(t){return !t;}).length;},0);
+  if(records.length===0||records.every(function(r){return r.troops.every(function(t){return !t;});})){ showAlert('ds-warnings','Nothing to log — no troops suggested.','danger'); return; }
+  if(vacantSlots>0&&!confirm(vacantSlots+' slot(s) are still unfilled (deleted/replaced with nothing picked). They will be left OUT of the logged roster — continue?')) return;
+  var loggedCount=0;
   records.forEach(function(r){
+    var filledTroops=r.troops.filter(Boolean);
+    if(filledTroops.length===0) return; // entire record is vacant — nothing to log
     var nd2RealDate=dutyRecordCalendarDate(_dsDate,r.startTime,_dsPeriod);
-    var nowIso2=new Date().toISOString(); var nd={id:uid('duty'),dutySeq:nextDutySeq(),date:nd2RealDate,logicalDate:_dsDate,type:r.category,postId:r.postId,postName:r.postName,startTime:r.startTime,durationHours:r.durationHours,troops:r.troops,remarks:'',adminOverride:false,replacements:[],createdAt:nowIso2,modifiedAt:nowIso2,cancelled:false,shiftIdx:(r.shiftIdx!=null?r.shiftIdx:null),shiftIdxCount:(r.shiftIdxCount!=null?r.shiftIdxCount:null)};
+    var nowIso2=new Date().toISOString(); var nd={id:uid('duty'),dutySeq:nextDutySeq(),date:nd2RealDate,logicalDate:_dsDate,type:r.category,postId:r.postId,postName:r.postName,startTime:r.startTime,durationHours:r.durationHours,troops:filledTroops,remarks:'',adminOverride:false,replacements:[],createdAt:nowIso2,modifiedAt:nowIso2,cancelled:false,shiftIdx:(r.shiftIdx!=null?r.shiftIdx:null),shiftIdxCount:(r.shiftIdxCount!=null?r.shiftIdxCount:null)};
     nd.dutyId=dutyDisplayId(nd);
     D.duties.push(nd);
+    loggedCount++;
   });
-  var _newlyLogged=D.duties.slice(-records.length);
+  var _newlyLogged=D.duties.slice(-loggedCount);
   if(_editingDutyDraftId){ D.dutyDrafts=D.dutyDrafts.filter(function(d){return d.id!==_editingDutyDraftId;}); }
   // Advance the Officer/JCO roaming rotation only now that the roster is
   // actually being logged — a preview that's regenerated or discarded
@@ -6087,7 +6124,7 @@ function logDutySuggestNow(){
   if(_dsPeriod==='night'&&_dsRoamingRotationPreview) D.config.roamingRotation=_dsRoamingRotationPreview;
   remoteSaveDuties(_newlyLogged);
   remoteSaveConfig();
-  audit('Duty roster logged: '+_dsPeriod+' · '+_dsDate+' · '+records.length+' entries');
+  audit('Duty roster logged: '+_dsPeriod+' · '+_dsDate+' · '+loggedCount+' entries');
   updateDutyDraftsBadge();
   closeDutySuggestModal();
   renderDutyPage(); renderDutyDashboard(); updateTodayDutyWidget();
@@ -6109,7 +6146,7 @@ function renderDutyDraftsList(){
     return;
   }
   el.innerHTML=D.dutyDrafts.slice().reverse().map(function(d){
-    var count=(d.records||[]).reduce(function(s,r){return s+r.troops.length;},0);
+    var count=(d.records||[]).reduce(function(s,r){return s+r.troops.filter(Boolean).length;},0);
     var cats=(d.records||[]).map(function(r){return r.postName||r.category;});
     var uniqCats=cats.filter(function(v,i){return cats.indexOf(v)===i;});
     return '<div style="padding:12px 0;border-bottom:1px solid var(--border);">'+
@@ -6154,6 +6191,8 @@ function editDutyDraft(id){
   if(!d) return;
   _editingDutyDraftId=id;
   _dsDate=d.plannedDate; _dsPeriod=d.period;
+  document.getElementById('ds-date').value=fmtDate(d.plannedDate);
+  document.getElementById('ds-period').value=d.period;
   _dsRoamingRotationPreview=d.roamingRotationPreview||null;
   _dsSlots=(d.records||[]).reduce(function(acc,r){
     var label;
@@ -6167,8 +6206,12 @@ function editDutyDraft(id){
       var matchShift=(D.config.dutyShifts||[]).find(function(sh){return sh.start===r.startTime;});
       label=(r.postName||'')+' — '+(matchShift?matchShift.name:(isDayTime(r.startTime)?'Day':'Night'));
     }
+    // tid may be null — a vacant seat kept in the draft (see
+    // dsSlotsToDutyRecords note). Rebuild it as an empty slot rather than
+    // skipping it, so it still shows in the editor with somewhere to place
+    // a troop, instead of the whole seat just disappearing.
     r.troops.forEach(function(tid){
-      acc.push({category:r.category,roamingRole:r.roamingRole||null,label:label,postId:r.postId,postName:r.postName,startTime:r.startTime,durationHours:r.durationHours,chosenId:tid,pool:[tid],poolPos:0});
+      acc.push({category:r.category,roamingRole:r.roamingRole||null,label:label,postId:r.postId,postName:r.postName,startTime:r.startTime,durationHours:r.durationHours,chosenId:tid||null,pool:tid?[tid]:[],poolPos:tid?0:-1});
     });
     return acc;
   },[]);
@@ -6192,9 +6235,17 @@ function editDutyDraft(id){
     });
     pool.sort(function(a,b){ var sc=dutyFairnessScore(a)-dutyFairnessScore(b); return sc!==0?sc:compareSeniority(a,b); });
     var ids=pool.map(function(t){return t.id;});
-    var pos=ids.indexOf(s.chosenId);
-    if(pos<0){ ids.unshift(s.chosenId); pos=0; }
-    s.pool=ids; s.poolPos=pos;
+    // Null-guard: a vacant slot has no chosenId, so there's nothing to
+    // force into the pool — unshifting null here would plant a literal
+    // null into s.pool/poolPos and corrupt every place that reads the
+    // "currently chosen" pool entry (Replace list, troopById lookups, etc).
+    if(s.chosenId){
+      var pos=ids.indexOf(s.chosenId);
+      if(pos<0){ ids.unshift(s.chosenId); pos=0; }
+      s.pool=ids; s.poolPos=pos;
+    } else {
+      s.pool=ids; s.poolPos=-1;
+    }
   });
   _dsWarnings=[];
   renderDsResults();
@@ -6208,13 +6259,23 @@ function editDutyDraft(id){
 function logDutyDraftNow(id){
   var d=D.dutyDrafts.find(function(x){return x.id===id;});
   if(!d) return;
+  var vacantSlots2=(d.records||[]).reduce(function(n,r){return n+(r.troops||[]).filter(function(t){return !t;}).length;},0);
+  if(vacantSlots2>0&&!confirm(vacantSlots2+' slot(s) in this draft are still unfilled. They will be left OUT of the logged roster — continue?')) return;
+  var loggedCount2=0;
   (d.records||[]).forEach(function(r){
+    // Skip records with no actual troop picked (vacant seat kept as null
+    // — see dsSlotsToDutyRecords) — logging them would create a duty
+    // entry with zero troops assigned.
+    var filledTroops2=(r.troops||[]).filter(Boolean);
+    if(filledTroops2.length===0) return;
     var nd3RealDate=dutyRecordCalendarDate(d.plannedDate,r.startTime,d.period);
-    var nowIso3=new Date().toISOString(); var nd={id:uid('duty'),dutySeq:nextDutySeq(),date:nd3RealDate,logicalDate:d.plannedDate,type:r.category,postId:r.postId,postName:r.postName,startTime:r.startTime,durationHours:r.durationHours,troops:r.troops.slice(),remarks:'',adminOverride:false,replacements:[],createdAt:nowIso3,modifiedAt:nowIso3,cancelled:false,shiftIdx:(r.shiftIdx!=null?r.shiftIdx:null),shiftIdxCount:(r.shiftIdxCount!=null?r.shiftIdxCount:null)};
+    var nowIso3=new Date().toISOString(); var nd={id:uid('duty'),dutySeq:nextDutySeq(),date:nd3RealDate,logicalDate:d.plannedDate,type:r.category,postId:r.postId,postName:r.postName,startTime:r.startTime,durationHours:r.durationHours,troops:filledTroops2,remarks:'',adminOverride:false,replacements:[],createdAt:nowIso3,modifiedAt:nowIso3,cancelled:false,shiftIdx:(r.shiftIdx!=null?r.shiftIdx:null),shiftIdxCount:(r.shiftIdxCount!=null?r.shiftIdxCount:null)};
     nd.dutyId=dutyDisplayId(nd);
     D.duties.push(nd);
+    loggedCount2++;
   });
-  var _newlyLogged2=D.duties.slice(-(d.records||[]).length);
+  if(loggedCount2===0){ showAlert&&showAlert('duty-drafts-list','Nothing to log — every slot in this draft is unfilled.','danger'); return; }
+  var _newlyLogged2=D.duties.slice(-loggedCount2);
   if(d.period==='night'&&d.roamingRotationPreview) D.config.roamingRotation=d.roamingRotationPreview;
   D.dutyDrafts=D.dutyDrafts.filter(function(x){return x.id!==id;});
   remoteSaveDuties(_newlyLogged2);
@@ -6443,6 +6504,7 @@ function dutyShiftCardHTML(grp,uid,opts){
     '<button type="button" class="btn btn-ghost btn-sm" onclick="toggleEl(\''+trId+'\',this,\'👥 Assigned Troops\',\'▴ Hide Troops\')" style="font-size:10.5px;">👥 Assigned Troops</button>'+
     '<button type="button" class="btn btn-ghost btn-sm" onclick="toggleEl(\''+poId+'\',this,\'📍 Posts\',\'▴ Hide Posts\')" style="font-size:10.5px;">📍 Posts</button>'+
     '<button type="button" class="btn btn-info btn-sm" onclick="printShiftDetails(\''+grp.date+'\',\''+grp.shift+'\')" style="font-size:10.5px;">🖨 Print Shift</button>'+
+    '<button type="button" class="btn btn-ghost btn-sm" style="font-size:10.5px;color:var(--red-light);border-color:var(--red-light);" onclick="deleteWholeShiftDuty(\''+grp.date+'\',\''+grp.shift+'\')" title="Permanently deletes every duty entry logged for this shift (all posts, Roaming, Line Duty) — not just suggestions. Cannot be undone.">🗑️ Delete this shift</button>'+
     '</div>'+
     '<div id="'+detId+'" style="display:none;margin-top:10px;">'+duties.map(function(d){return dutyDetailLineHTML(d,opts.history);}).join('')+'</div>'+
     '<div id="'+trId+'" style="display:none;margin-top:10px;font-size:12.5px;">'+(troopNames||'<span style="color:var(--text-muted);">No troops</span>')+'</div>'+
@@ -9266,7 +9328,21 @@ function logPatrol(){
     // patrol instead of creating a duplicate.
     if(dup){
       var goEdit=confirm('A patrol already exists for this date and type ('+(dup.ptlId||dup.id)+') with mostly the same troops — likely the same patrol.\n\nPress OK to edit that existing patrol instead (recommended). Press Cancel to log this as a genuinely separate new patrol anyway.');
-      if(goEdit){ pendingDraftLogId=null; editPatrol(dup.id); return; }
+      if(goEdit){
+        // This branch merges into the existing patrol instead of falling
+        // through to the normal "new patrol" path below, so it must do its
+        // own draft cleanup here — otherwise a draft logged into a duplicate
+        // never gets removed from D.drafts and keeps reappearing after sync.
+        var mergedDraftId=pendingDraftLogId;
+        pendingDraftLogId=null;
+        if(mergedDraftId){
+          D.drafts=D.drafts.filter(function(d){return d.id!==mergedDraftId;});
+          remoteSaveConfig();
+          updateDraftsBadge();
+        }
+        editPatrol(dup.id);
+        return;
+      }
     }
     var newPatrol={id:uid('p'),ptlSeq:nextPtlSeq(),date:date,type:type,troops:selectedTroops.slice(),duration:dur,area:area,route:route,remarks:rem,commander:selectedCommander||null,commanderAuto:selectedCommander?false:null};
     newPatrol.ptlId=patrolDisplayId(newPatrol);
