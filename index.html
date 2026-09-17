@@ -3623,8 +3623,18 @@ function remoteDeletePatrol(id){ saveData(); return _trackWrite(apiFetch('/patro
 // erasing duties logged from other devices. Same shape as
 // remoteSaveTroop/remoteSavePatrol: write local first, push to the
 // server, and queue it for retry if that fails/is offline.
-function remoteSaveDuty(d){ saveData(); var body={id:d.id,dutySeq:d.dutySeq,date:d.date,logicalDate:d.logicalDate,type:d.type,postId:d.postId,postName:d.postName,startTime:d.startTime,durationHours:d.durationHours,troops:d.troops,remarks:d.remarks,adminOverride:d.adminOverride,replacements:d.replacements,createdAt:d.createdAt,modifiedAt:d.modifiedAt,cancelled:d.cancelled,cancelledAt:d.cancelledAt||null,shiftIdx:d.shiftIdx,shiftIdxCount:d.shiftIdxCount,dutyId:d.dutyId}; return _trackWrite(apiFetch('/duties',{method:'POST',body:JSON.stringify(body)}).catch(function(e){console.error('saveDuty failed',e); queueOp('saveDuty',body);})); }
-function remoteSaveDuties(list){ return Promise.all((list||[]).map(function(d){ return remoteSaveDuty(d); })); }
+// saveData() does a full JSON.stringify of the entire app state (every
+// troop/patrol/duty/audit entry ever recorded) — not cheap once a unit's
+// history has built up over months. remoteSaveDuty() used to call it on
+// every single invocation, and remoteSaveDuties() just looped that per
+// record — so logging a roster with N posts/shifts (e.g. "Log Now" on a
+// 9-post duty draft) ran a full-state stringify+localStorage write NINE
+// times in a row, synchronously, before the click even finished being
+// handled. That's what made Log Now (and any multi-record duty log) feel
+// like it took several seconds to react. skipLocalSave lets the batch
+// path (remoteSaveDuties) do exactly one saveData() up front instead.
+function remoteSaveDuty(d,skipLocalSave){ if(!skipLocalSave) saveData(); var body={id:d.id,dutySeq:d.dutySeq,date:d.date,logicalDate:d.logicalDate,type:d.type,postId:d.postId,postName:d.postName,startTime:d.startTime,durationHours:d.durationHours,troops:d.troops,remarks:d.remarks,adminOverride:d.adminOverride,replacements:d.replacements,createdAt:d.createdAt,modifiedAt:d.modifiedAt,cancelled:d.cancelled,cancelledAt:d.cancelledAt||null,shiftIdx:d.shiftIdx,shiftIdxCount:d.shiftIdxCount,dutyId:d.dutyId}; return _trackWrite(apiFetch('/duties',{method:'POST',body:JSON.stringify(body)}).catch(function(e){console.error('saveDuty failed',e); queueOp('saveDuty',body);})); }
+function remoteSaveDuties(list){ saveData(); return Promise.all((list||[]).map(function(d){ return remoteSaveDuty(d,true); })); }
 function remoteDeleteDuty(id){ saveData(); return _trackWrite(apiFetch('/duties/'+id,{method:'DELETE'}).catch(function(e){console.error(e); queueOp('deleteDuty',{id:id});})); }
 function remoteSaveAudit(entry){ return _trackWrite(apiFetch('/audit',{method:'POST',body:JSON.stringify(entry)}).catch(function(e){console.error(e); queueOp('saveAudit',entry);})); }
 // remoteSaveConfig used to fire all 9 key/value writes to /config in parallel.
@@ -5142,12 +5152,19 @@ function openReplaceFlow(outTroopId){
     // Patrol drafts reserve their troops regardless of the draft's own
     // date (same rule as everywhere else — draftReservedTroopIds).
     if(draftReservedTroopIds()[t.id]) return false;
-    // Also check other unlogged duty drafts for this exact shift, same as
-    // the search box above (dutyTroopSuggest) and the suggestion engine —
-    // pass the shift's period so this uses the same midnight-aware
-    // "ongoing right now" check as dutyConflict()'s other callers, instead
-    // of the older raw-date-string comparison.
-    if(date&&dutyConflict(t.id,date,ed0.startTime,ed0.durationHours,editingDutyId,null,ed0.startTime?(isDayTime(ed0.startTime)?'day':'night'):null).draftDuty) return false;
+    // Also check other unlogged duty drafts for this exact shift, AND any
+    // other already-LOGGED duty that overlaps this same time window — same
+    // as the search box above (dutyTroopSuggest) and the suggestion engine
+    // (dutySuggestTroop, which checks c.duty||c.patrol||c.draftDuty).
+    // This picks the first match automatically with no review step and
+    // saves immediately (remoteSaveDuty below), so unlike the search box —
+    // which only flags a c.duty overlap as a soft warning for the human to
+    // notice — a genuine overlap must be excluded outright here, or a
+    // replacement can get silently double-booked onto two duties at once.
+    if(date){
+      var rc=dutyConflict(t.id,date,ed0.startTime,ed0.durationHours,editingDutyId,null,ed0.startTime?(isDayTime(ed0.startTime)?'day':'night'):null);
+      if(rc.duty||rc.draftDuty) return false;
+    }
     // This picks the first match automatically with no review step, so
     // a Contingency-Mode-restricted troop must be excluded outright here
     // rather than just flagged (as the search box above does).
@@ -5796,7 +5813,12 @@ function dsFillPass(date,slotList,used,warnings,allowSgtFallback){
       }
     }
     if(qual){
-      var postSlotsFilled=slotList.filter(function(s){return s.postId===slot.postId&&s.chosenId;});
+      // Scoped to THIS shift (same post + same shift label) — not the
+      // whole post across every shift in the pass, for the same reason
+      // the required-rank check below is scoped this way: a qualified
+      // troop on Morning must not wrongly exempt Afternoon (a different
+      // set of troops entirely) from needing its own qualified troop.
+      var postSlotsFilled=slotList.filter(function(s){return s.postId===slot.postId&&s.label===slot.label&&s.chosenId;});
       var qualAlready=postSlotsFilled.some(function(s){var t=troopById(s.chosenId);return t&&isDutyQualified(t,qual);});
       if(!qualAlready){
         var qPool=pool.filter(function(t){return isDutyQualified(t,qual);});
@@ -7246,7 +7268,7 @@ function migrateDutySeq(){
   function nextBatch(){
     var batch=toSave.slice(i,i+batchSize);
     if(batch.length===0){ remoteSaveConfig(); return; }
-    Promise.all(batch.map(function(d){ return remoteSaveDuty(d); })).then(function(){ i+=batchSize; setTimeout(nextBatch,600); });
+    Promise.all(batch.map(function(d){ return remoteSaveDuty(d,true); })).then(function(){ i+=batchSize; setTimeout(nextBatch,600); });
   }
   nextBatch();
 }
@@ -9217,7 +9239,15 @@ var editingPatrolId=null;
 // new patrol log (Priority 1: "not be selectable for other activities").
 // Excludes the draft actually being logged right now (pendingDraftLogId),
 // since its own troops are already in selectedTroops anyway.
-function troopSuggest(val){ var box=document.getElementById('troop-suggest'); if(!val||val.length===0){box.style.display='none';return;} var q=val.toLowerCase(); var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){return (t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)>=0&&selectedTroops.indexOf(t.id)<0&&!isTroopReserved(t.id,{excludePatrolDraftId:pendingDraftLogId,patrolMode:true});}); if(matches.length===0){box.style.display='none';return;} box.style.display='block'; box.innerHTML=matches.slice(0,8).map(function(t){ return '<div class="suggest-item" onclick="addTroopToPatrol(\''+t.id+'\')">'+'<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+' <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span></div>'; }).join(''); }
+// Checked against the date actually entered in the form (p-date) — not
+// "right now" — so a patrol being logged for a future date correctly
+// follows the same "future date = free of duty-based reservation" rule
+// isTroopReserved's patrolMode already applies everywhere else (Suggest
+// Team, the patrol draft editor). Without this, typing a name into this
+// box while logging tomorrow's patrol was silently checking today's
+// live duty status instead, wrongly hiding troops who are only busy
+// right now and wrongly missing ones who are actually busy that day.
+function troopSuggest(val){ var box=document.getElementById('troop-suggest'); if(!val||val.length===0){box.style.display='none';return;} var q=val.toLowerCase(); var pDate=parseDate(document.getElementById('p-date').value)||null; var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){return (t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)>=0&&selectedTroops.indexOf(t.id)<0&&!isTroopReserved(t.id,{excludePatrolDraftId:pendingDraftLogId,date:pDate,patrolMode:true});}); if(matches.length===0){box.style.display='none';return;} box.style.display='block'; box.innerHTML=matches.slice(0,8).map(function(t){ return '<div class="suggest-item" onclick="addTroopToPatrol(\''+t.id+'\')">'+'<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+' <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span></div>'; }).join(''); }
 function addTroopToPatrol(id){ if(selectedTroops.indexOf(id)<0) selectedTroops.push(id); document.getElementById('troop-search').value=''; document.getElementById('troop-suggest').style.display='none'; renderSelected(); }
 function removeTroopFromPatrol(id){ selectedTroops=selectedTroops.filter(function(x){return x!==id;}); if(selectedCommander===id) selectedCommander=null; renderSelected(); }
 function renderCommanderDropdown(){
@@ -10610,7 +10640,7 @@ function doExport(){ var backup={version:4,exportDate:new Date().toISOString(),e
 function dlFile(content,type,filename){ var blob=new Blob([content],{type:type}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a);a.click(); document.body.removeChild(a);URL.revokeObjectURL(a.href); }
 var pendingRestore=null;
 function previewRestore(input){ var file=input.files[0]; if(!file) return; var reader=new FileReader(); reader.onload=function(e){ try{var backup=JSON.parse(e.target.result);if(!backup.data) throw new Error('Invalid');pendingRestore=backup;var d=backup.data;var prev=document.getElementById('restore-preview');prev.style.display='';prev.className='alert al-info';prev.innerHTML='Valid backup: <strong>'+(backup.exportDate?backup.exportDate.slice(0,10):'?')+'</strong><br>Troops: <strong>'+(d.troops||[]).length+'</strong> · Archived: <strong>'+(d.archived||[]).length+'</strong> · Patrols: <strong>'+(d.patrols||[]).length+'</strong><br><strong style="color:#ff9999;">This will overwrite all current data.</strong>';document.getElementById('restore-btn').style.display='';document.getElementById('restore-cancel').style.display='';}catch(err){var prev=document.getElementById('restore-preview');prev.style.display='';prev.className='alert al-danger';prev.innerHTML='Invalid backup file.';document.getElementById('restore-btn').style.display='none';document.getElementById('restore-cancel').style.display='none';} }; reader.readAsText(file); }
-function doRestore(){ if(!pendingRestore||!pendingRestore.data){alert('No valid backup.');return;} D=pendingRestore.data; if(!D.archived) D.archived=[]; if(!D.counter) D.counter=D.patrols.length+1; if(!D.audit) D.audit=[]; if(!D.settings) D.settings={pob:'',mission:'',commander:'',classification:'CONFIDENTIAL'}; if(!D.config) D.config={types:DEFAULT_TYPES.slice(),sectors:DEFAULT_SECTORS.slice(),routes:DEFAULT_ROUTES.slice(),ranks:DEFAULT_RANKS.slice()}; if(!D.config.ranks) D.config.ranks=DEFAULT_RANKS.slice(); if(!D.drafts) D.drafts=[]; migrateDutySystem(); RANKS=D.config.ranks; D.troops.forEach(function(t){if(!t.status)t.status='available';if(!t.notes)t.notes='';}); migratePatrolSeq(); migrateDutySeq(); saveData(); var allTroops=D.troops.concat(D.archived); Promise.all(allTroops.map(function(t){return apiFetch('/troops',{method:'POST',body:JSON.stringify(t)}).catch(function(){});}).concat(D.patrols.map(function(p){return remoteSavePatrol(p);})).concat((D.duties||[]).map(function(d){return remoteSaveDuty(d);}))).then(function(){return remoteSaveConfig();}); D.archived.forEach(function(t){apiFetch('/troops/'+t.id+'/archive',{method:'PATCH',body:JSON.stringify({archived:true,archivedDate:t.archivedDate})}).catch(function(){});}); document.getElementById('restore-alert').innerHTML='<div class="alert al-success">Restore successful!</div>'; cancelRestore(); applySettings(); populateDropdowns(); populateRankDropdowns(); renderDash(); renderSysInfo(); updateDraftsBadge(); updateDutyDraftsBadge(); audit('Data restored from backup'); setTimeout(function(){document.getElementById('restore-alert').innerHTML='';},5000); }
+function doRestore(){ if(!pendingRestore||!pendingRestore.data){alert('No valid backup.');return;} D=pendingRestore.data; if(!D.archived) D.archived=[]; if(!D.counter) D.counter=D.patrols.length+1; if(!D.audit) D.audit=[]; if(!D.settings) D.settings={pob:'',mission:'',commander:'',classification:'CONFIDENTIAL'}; if(!D.config) D.config={types:DEFAULT_TYPES.slice(),sectors:DEFAULT_SECTORS.slice(),routes:DEFAULT_ROUTES.slice(),ranks:DEFAULT_RANKS.slice()}; if(!D.config.ranks) D.config.ranks=DEFAULT_RANKS.slice(); if(!D.drafts) D.drafts=[]; migrateDutySystem(); RANKS=D.config.ranks; D.troops.forEach(function(t){if(!t.status)t.status='available';if(!t.notes)t.notes='';}); migratePatrolSeq(); migrateDutySeq(); saveData(); var allTroops=D.troops.concat(D.archived); Promise.all(allTroops.map(function(t){return apiFetch('/troops',{method:'POST',body:JSON.stringify(t)}).catch(function(){});}).concat(D.patrols.map(function(p){return remoteSavePatrol(p);})).concat((D.duties||[]).map(function(d){return remoteSaveDuty(d,true);}))).then(function(){return remoteSaveConfig();}); D.archived.forEach(function(t){apiFetch('/troops/'+t.id+'/archive',{method:'PATCH',body:JSON.stringify({archived:true,archivedDate:t.archivedDate})}).catch(function(){});}); document.getElementById('restore-alert').innerHTML='<div class="alert al-success">Restore successful!</div>'; cancelRestore(); applySettings(); populateDropdowns(); populateRankDropdowns(); renderDash(); renderSysInfo(); updateDraftsBadge(); updateDutyDraftsBadge(); audit('Data restored from backup'); setTimeout(function(){document.getElementById('restore-alert').innerHTML='';},5000); }
 function cancelRestore(){ pendingRestore=null; document.getElementById('restore-file').value=''; document.getElementById('restore-preview').style.display='none'; document.getElementById('restore-btn').style.display='none'; document.getElementById('restore-cancel').style.display='none'; }
 function renderSysInfo(){ var sz=JSON.stringify(D).length; document.getElementById('sys-info').innerHTML='Version: v4 (Mobile)<br>Active Troops: '+D.troops.length+'<br>Archived Troops: '+(D.archived||[]).length+'<br>Total Patrols: '+D.patrols.length+'<br>Total Hours: '+D.patrols.reduce(function(s,p){return s+(parseFloat(p.duration)||0);},0).toFixed(1)+'h<br>Patrol Types: '+D.config.types.length+'<br>Sectors: '+D.config.sectors.length+'<br>Audit Entries: '+D.audit.length+'<br>Next Patrol ID: PTL-'+new Date().getFullYear()+'-'+String(D.counter).padStart(3,'0')+'<br>Storage Used: ~'+(sz/1024).toFixed(1)+' KB<br>API: '+API_URL; }
 
