@@ -1339,6 +1339,9 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       </div>
       <div id="ds-config-alert"></div>
       <button class="btn btn-primary btn-full" onclick="generateDutySuggestion()">🎯 Generate Suggestion</button>
+      <button class="btn btn-ghost btn-full" id="ds-cancel-adjust-btn" style="display:none;margin-top:8px;" onclick="dsCancelAdjust()">↩ Cancel — Back to Results (keep my edits)</button>
+      <button class="btn btn-ghost btn-full" style="color:var(--red-light);border-color:var(--red-light);margin-top:8px;" onclick="deleteWholeShiftDuty()">🗑️ Delete Logged Duty for This Shift</button>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:6px;line-height:1.4;">Permanently deletes every duty entry already logged for the date &amp; period above (all posts, Roaming, Line Duty) — not just suggestions. Cannot be undone.</div>
     </div>
     <div id="ds-results" style="display:none;">
       <div id="ds-warnings"></div>
@@ -2541,7 +2544,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
         </div>
         <div class="fg" id="commander-field-wrap" style="display:none;">
           <label class="field-label">⭐ Commander (optional)</label>
-          <select id="p-commander" onchange="selectedCommander=this.value||null;"><option value="">-- None --</option></select>
+          <select id="p-commander" onchange="selectedCommander=this.value||null; commanderManuallyChanged=true;"><option value="">-- None --</option></select>
         </div>
       </div>
     </div>
@@ -3623,18 +3626,8 @@ function remoteDeletePatrol(id){ saveData(); return _trackWrite(apiFetch('/patro
 // erasing duties logged from other devices. Same shape as
 // remoteSaveTroop/remoteSavePatrol: write local first, push to the
 // server, and queue it for retry if that fails/is offline.
-// saveData() does a full JSON.stringify of the entire app state (every
-// troop/patrol/duty/audit entry ever recorded) — not cheap once a unit's
-// history has built up over months. remoteSaveDuty() used to call it on
-// every single invocation, and remoteSaveDuties() just looped that per
-// record — so logging a roster with N posts/shifts (e.g. "Log Now" on a
-// 9-post duty draft) ran a full-state stringify+localStorage write NINE
-// times in a row, synchronously, before the click even finished being
-// handled. That's what made Log Now (and any multi-record duty log) feel
-// like it took several seconds to react. skipLocalSave lets the batch
-// path (remoteSaveDuties) do exactly one saveData() up front instead.
-function remoteSaveDuty(d,skipLocalSave){ if(!skipLocalSave) saveData(); var body={id:d.id,dutySeq:d.dutySeq,date:d.date,logicalDate:d.logicalDate,type:d.type,postId:d.postId,postName:d.postName,startTime:d.startTime,durationHours:d.durationHours,troops:d.troops,remarks:d.remarks,adminOverride:d.adminOverride,replacements:d.replacements,createdAt:d.createdAt,modifiedAt:d.modifiedAt,cancelled:d.cancelled,cancelledAt:d.cancelledAt||null,shiftIdx:d.shiftIdx,shiftIdxCount:d.shiftIdxCount,dutyId:d.dutyId}; return _trackWrite(apiFetch('/duties',{method:'POST',body:JSON.stringify(body)}).catch(function(e){console.error('saveDuty failed',e); queueOp('saveDuty',body);})); }
-function remoteSaveDuties(list){ saveData(); return Promise.all((list||[]).map(function(d){ return remoteSaveDuty(d,true); })); }
+function remoteSaveDuty(d){ saveData(); var body={id:d.id,dutySeq:d.dutySeq,date:d.date,logicalDate:d.logicalDate,type:d.type,postId:d.postId,postName:d.postName,startTime:d.startTime,durationHours:d.durationHours,troops:d.troops,remarks:d.remarks,adminOverride:d.adminOverride,replacements:d.replacements,createdAt:d.createdAt,modifiedAt:d.modifiedAt,cancelled:d.cancelled,cancelledAt:d.cancelledAt||null,shiftIdx:d.shiftIdx,shiftIdxCount:d.shiftIdxCount,dutyId:d.dutyId}; return _trackWrite(apiFetch('/duties',{method:'POST',body:JSON.stringify(body)}).catch(function(e){console.error('saveDuty failed',e); queueOp('saveDuty',body);})); }
+function remoteSaveDuties(list){ return Promise.all((list||[]).map(function(d){ return remoteSaveDuty(d); })); }
 function remoteDeleteDuty(id){ saveData(); return _trackWrite(apiFetch('/duties/'+id,{method:'DELETE'}).catch(function(e){console.error(e); queueOp('deleteDuty',{id:id});})); }
 function remoteSaveAudit(entry){ return _trackWrite(apiFetch('/audit',{method:'POST',body:JSON.stringify(entry)}).catch(function(e){console.error(e); queueOp('saveAudit',entry);})); }
 // remoteSaveConfig used to fire all 9 key/value writes to /config in parallel.
@@ -4630,6 +4623,7 @@ function useSuggestedTeam(){
   var ids=_stmSlots.map(function(s){return s.chosenId;}).filter(Boolean);
   selectedTroops=ids.slice();
   selectedCommander=null;
+  commanderManuallyChanged=false;
   pendingDraftLogId=null;
   closeSuggestTeamModal();
   editingPatrolId=null;
@@ -4795,6 +4789,7 @@ function logDraftAsPatrol(id){
   var ids=(d.troops||[]).filter(function(tid){return troopById(tid);});
   selectedTroops=ids.slice();
   selectedCommander=null;
+  commanderManuallyChanged=false;
   pendingDraftLogId=id;
   closeDraftsModal();
   editingPatrolId=null;
@@ -5152,19 +5147,12 @@ function openReplaceFlow(outTroopId){
     // Patrol drafts reserve their troops regardless of the draft's own
     // date (same rule as everywhere else — draftReservedTroopIds).
     if(draftReservedTroopIds()[t.id]) return false;
-    // Also check other unlogged duty drafts for this exact shift, AND any
-    // other already-LOGGED duty that overlaps this same time window — same
-    // as the search box above (dutyTroopSuggest) and the suggestion engine
-    // (dutySuggestTroop, which checks c.duty||c.patrol||c.draftDuty).
-    // This picks the first match automatically with no review step and
-    // saves immediately (remoteSaveDuty below), so unlike the search box —
-    // which only flags a c.duty overlap as a soft warning for the human to
-    // notice — a genuine overlap must be excluded outright here, or a
-    // replacement can get silently double-booked onto two duties at once.
-    if(date){
-      var rc=dutyConflict(t.id,date,ed0.startTime,ed0.durationHours,editingDutyId,null,ed0.startTime?(isDayTime(ed0.startTime)?'day':'night'):null);
-      if(rc.duty||rc.draftDuty) return false;
-    }
+    // Also check other unlogged duty drafts for this exact shift, same as
+    // the search box above (dutyTroopSuggest) and the suggestion engine —
+    // pass the shift's period so this uses the same midnight-aware
+    // "ongoing right now" check as dutyConflict()'s other callers, instead
+    // of the older raw-date-string comparison.
+    if(date&&dutyConflict(t.id,date,ed0.startTime,ed0.durationHours,editingDutyId,null,ed0.startTime?(isDayTime(ed0.startTime)?'day':'night'):null).draftDuty) return false;
     // This picks the first match automatically with no review step, so
     // a Contingency-Mode-restricted troop must be excluded outright here
     // rather than just flagged (as the search box above does).
@@ -5187,6 +5175,7 @@ function openReplaceFlow(outTroopId){
     renderDutyReplaceList(ed);
     dutyRefreshConflicts();
     renderDutyPage();
+    renderDutyDashboard();
     updateTodayDutyWidget();
     showAlert('duty-alert',upLabel(inT.rank,inT.name)+' now covering for '+upLabel(outT.rank,outT.name)+'.','success');
   }
@@ -5285,6 +5274,7 @@ function saveDuty(){
   renderDutySelectedTroops();
   dutyRefreshConflicts();
   renderDutyPage();
+  renderDutyDashboard();
   updateTodayDutyWidget();
 }
 function deleteDutyFromModal(){
@@ -5297,6 +5287,7 @@ function deleteDutyFromModal(){
   editingDutyId=null; dutySelectedTroops=[];
   closeDutyModal();
   renderDutyPage();
+  renderDutyDashboard();
   updateTodayDutyWidget();
 }
 // Cancellation (Duty History) keeps the record — unlike Delete above,
@@ -5342,35 +5333,55 @@ function openDutySuggestModal(){
   document.getElementById('ds-period').value='day';
   document.getElementById('ds-config').style.display='';
   document.getElementById('ds-results').style.display='none';
+  var cb=document.getElementById('ds-cancel-adjust-btn'); if(cb) cb.style.display='none';
   document.getElementById('ds-modal-title').textContent='🎯 Suggest Duty Roster';
   document.getElementById('duty-suggest-modal').classList.add('open');
   dsScrollTop();
 }
 function closeDutySuggestModal(){ document.getElementById('duty-suggest-modal').classList.remove('open'); _dsManualPickSlot=-1; var rp=document.getElementById('ds-remaining-troops'); if(rp) rp.style.display='none'; }
 // Permanently deletes EVERY logged duty entry (every post, Roaming, Line
-// Duty — the whole shift) for the given date+period, in one click —
-// instead of opening and deleting each entry one by one. Lives as a
-// small action on each shift card in Duty Roster/History. Grouping uses
-// the same logical-date + day/night rule as everywhere else
-// (dutyDisplayDate + isDayTime), so "this shift" matches what's shown on
-// the card. This is a hard delete like the single-entry Delete button (no
-// audit trail row survives) — unlike Cancel, which keeps the record.
-function deleteWholeShiftDuty(date,period){
+// Duty — the whole shift) for whatever date+period is currently set in the
+// Duty Suggestion form, in one click — instead of opening and deleting
+// each entry one by one from Duty Roster/History. Grouping uses the same
+// logical-date + day/night rule as everywhere else (dutyDisplayDate +
+// isDayTime), so "this shift" matches what's shown in Duty Roster/History.
+// This is a hard delete like the single-entry Delete button (no audit
+// trail row survives) — unlike Cancel, which keeps the record.
+function deleteWholeShiftDuty(){
+  var date=parseDate(document.getElementById('ds-date').value);
+  var period=document.getElementById('ds-period').value;
+  if(!date){ showAlert('ds-config-alert','Enter a valid date (DD/MM/YYYY) first.','danger'); return; }
   var matches=D.duties.filter(function(d){
     return dutyDisplayDate(d)===date && (isDayTime(d.startTime)?'day':'night')===period;
   });
-  if(matches.length===0){ alert('No duty logged for '+(period==='day'?'Day':'Night')+' · '+fmtDate(date)+'.'); return; }
+  if(matches.length===0){ showAlert('ds-config-alert','No duty logged for '+(period==='day'?'Day':'Night')+' · '+fmtDate(date)+'.','warn'); return; }
   var troopCount=matches.reduce(function(n,d){return n+(d.troops||[]).length;},0);
   if(!confirm('Permanently delete ALL '+matches.length+' duty entr'+(matches.length===1?'y':'ies')+' ('+troopCount+' troop assignment(s)) logged for '+(period==='day'?'☀ Day':'🌙 Night')+' duty on '+fmtDate(date)+'? This cannot be undone.')) return;
   var ids=matches.map(function(d){return d.id;});
   D.duties=D.duties.filter(function(d){return ids.indexOf(d.id)<0;});
   ids.forEach(function(id){ remoteDeleteDuty(id); });
   audit('Whole shift duty deleted: '+(period==='day'?'Day':'Night')+' · '+date+' · '+matches.length+' entries');
+  showAlert('ds-config-alert','Deleted '+matches.length+' duty entr'+(matches.length===1?'y':'ies')+' for that shift.','success');
   renderDutyPage(); renderDutyDashboard(); updateTodayDutyWidget();
   if(document.getElementById('dh-search')) renderDutyHistoryList();
   updateDutyDraftsBadge();
 }
-function dsBackToConfig(){ document.getElementById('ds-config').style.display=''; document.getElementById('ds-results').style.display='none'; dsScrollTop(); _dsManualPickSlot=-1; var rp=document.getElementById('ds-remaining-troops'); if(rp) rp.style.display='none'; }
+function dsBackToConfig(){ document.getElementById('ds-config').style.display=''; document.getElementById('ds-results').style.display='none'; dsScrollTop(); _dsManualPickSlot=-1; var rp=document.getElementById('ds-remaining-troops'); if(rp) rp.style.display='none'; var cb=document.getElementById('ds-cancel-adjust-btn'); if(cb) cb.style.display=(_dsSlots&&_dsSlots.length)?'':'none'; }
+// Lets you back out of "← Adjust" without losing the roster you already
+// have (generated or hand-edited) — previously the only ways out were
+// hitting Generate Suggestion (which threw away every manual pick and
+// rebuilt from scratch) or closing the whole modal (which threw away
+// everything, including a draft's saved state). This just re-shows the
+// existing results unchanged; nothing in _dsSlots/_dsDate/_dsPeriod is
+// touched. Also resets the date/period inputs back to what's actually
+// being shown, in case they were edited but never applied via Generate.
+function dsCancelAdjust(){
+  document.getElementById('ds-date').value=dmyFromISO(_dsDate);
+  document.getElementById('ds-period').value=_dsPeriod;
+  document.getElementById('ds-config').style.display='none';
+  document.getElementById('ds-results').style.display='';
+  dsScrollTop();
+}
 // Day duty is Sentry posts only. Night duty is Sentry + Roaming + Line
 // Duty (evening/night activities). Continuous posts (Signal/Medical) span
 // both, so they're generated together with the Day pass.
@@ -5813,12 +5824,7 @@ function dsFillPass(date,slotList,used,warnings,allowSgtFallback){
       }
     }
     if(qual){
-      // Scoped to THIS shift (same post + same shift label) — not the
-      // whole post across every shift in the pass, for the same reason
-      // the required-rank check below is scoped this way: a qualified
-      // troop on Morning must not wrongly exempt Afternoon (a different
-      // set of troops entirely) from needing its own qualified troop.
-      var postSlotsFilled=slotList.filter(function(s){return s.postId===slot.postId&&s.label===slot.label&&s.chosenId;});
+      var postSlotsFilled=slotList.filter(function(s){return s.postId===slot.postId&&s.chosenId;});
       var qualAlready=postSlotsFilled.some(function(s){var t=troopById(s.chosenId);return t&&isDutyQualified(t,qual);});
       if(!qualAlready){
         var qPool=pool.filter(function(t){return isDutyQualified(t,qual);});
@@ -6213,7 +6219,17 @@ function editDutyDraft(id){
   if(!d) return;
   _editingDutyDraftId=id;
   _dsDate=d.plannedDate; _dsPeriod=d.period;
-  document.getElementById('ds-date').value=fmtDate(d.plannedDate);
+  // Keep the ds-config screen's own date/period inputs in sync with the
+  // draft being edited. editDutyDraft() jumps straight to ds-results, so
+  // normally these fields are hidden — but "← Adjust" (dsBackToConfig)
+  // reveals ds-config again without repopulating it. Without this, those
+  // inputs would still hold whatever was left over from the last time the
+  // modal was opened fresh (e.g. today's date, Day), so hitting "Adjust"
+  // then "Generate Suggestion" on a draft silently regenerated for the
+  // WRONG date/period and, on Save, overwrote the original draft's
+  // plannedDate/period with it — corrupting a draft that was, say, for a
+  // future date's Night duty into today's Day duty.
+  document.getElementById('ds-date').value=dmyFromISO(d.plannedDate);
   document.getElementById('ds-period').value=d.period;
   _dsRoamingRotationPreview=d.roamingRotationPreview||null;
   _dsSlots=(d.records||[]).reduce(function(acc,r){
@@ -6526,7 +6542,6 @@ function dutyShiftCardHTML(grp,uid,opts){
     '<button type="button" class="btn btn-ghost btn-sm" onclick="toggleEl(\''+trId+'\',this,\'👥 Assigned Troops\',\'▴ Hide Troops\')" style="font-size:10.5px;">👥 Assigned Troops</button>'+
     '<button type="button" class="btn btn-ghost btn-sm" onclick="toggleEl(\''+poId+'\',this,\'📍 Posts\',\'▴ Hide Posts\')" style="font-size:10.5px;">📍 Posts</button>'+
     '<button type="button" class="btn btn-info btn-sm" onclick="printShiftDetails(\''+grp.date+'\',\''+grp.shift+'\')" style="font-size:10.5px;">🖨 Print Shift</button>'+
-    '<button type="button" class="btn btn-ghost btn-sm" style="font-size:10.5px;color:var(--red-light);border-color:var(--red-light);" onclick="deleteWholeShiftDuty(\''+grp.date+'\',\''+grp.shift+'\')" title="Permanently deletes every duty entry logged for this shift (all posts, Roaming, Line Duty) — not just suggestions. Cannot be undone.">🗑️ Delete this shift</button>'+
     '</div>'+
     '<div id="'+detId+'" style="display:none;margin-top:10px;">'+duties.map(function(d){return dutyDetailLineHTML(d,opts.history);}).join('')+'</div>'+
     '<div id="'+trId+'" style="display:none;margin-top:10px;font-size:12.5px;">'+(troopNames||'<span style="color:var(--text-muted);">No troops</span>')+'</div>'+
@@ -7138,6 +7153,13 @@ function saveContingencyGroup(){
   document.getElementById('cg-end').value='';
   renderCgSelected();
   renderContingencyList();
+  // BUG FIX: this modal opens as an overlay directly on top of the Duty
+  // Dashboard (its trigger button lives there), which shows its own
+  // "🚧 N active contingency exclusion(s)" alert computed from
+  // D.dutyContingency. Without this, adding/toggling/deleting a group here
+  // never updated that alert behind the modal — same stale-dashboard bug
+  // as saveDuty()/deleteDutyFromModal() had.
+  renderDutyDashboard();
   showAlert('cg-alert','Exclusion group saved.','success');
 }
 function toggleContingencyActive(id){
@@ -7147,6 +7169,7 @@ function toggleContingencyActive(id){
   remoteSaveConfig();
   audit('Contingency exclusion '+(g.active?'reactivated':'deactivated')+': '+g.reason);
   renderContingencyList();
+  renderDutyDashboard();
 }
 function deleteContingencyGroup(id){
   if(!confirm('Delete this contingency exclusion group?')) return;
@@ -7155,6 +7178,7 @@ function deleteContingencyGroup(id){
   remoteSaveConfig();
   audit('Contingency exclusion deleted: '+(g?g.reason:''));
   renderContingencyList();
+  renderDutyDashboard();
 }
 function renderContingencyList(){
   var el=document.getElementById('contingency-list');
@@ -7268,7 +7292,7 @@ function migrateDutySeq(){
   function nextBatch(){
     var batch=toSave.slice(i,i+batchSize);
     if(batch.length===0){ remoteSaveConfig(); return; }
-    Promise.all(batch.map(function(d){ return remoteSaveDuty(d,true); })).then(function(){ i+=batchSize; setTimeout(nextBatch,600); });
+    Promise.all(batch.map(function(d){ return remoteSaveDuty(d); })).then(function(){ i+=batchSize; setTimeout(nextBatch,600); });
   }
   nextBatch();
 }
@@ -8283,7 +8307,7 @@ function _showTabInner(id){
 function openLogPatrolModal(){
   function doOpen(){
     document.getElementById('log-patrol-modal-title').textContent=editingPatrolId?'Edit Patrol':'Log New Patrol';
-    if(!editingPatrolId){selectedTroops=[];selectedCommander=null;}
+    if(!editingPatrolId){selectedTroops=[];selectedCommander=null;commanderManuallyChanged=false;}
     renderSelected(); updatePtlPreview();
     if(editingPatrolId){
       document.getElementById('p-submit-btn').textContent='💾 Save Changes';
@@ -9233,23 +9257,26 @@ function showDashDetail(kind,extra){
 // =====================================================================
 var selectedTroops=[];
 var selectedCommander=null;
+// Tracks whether the person actually touched the Commander dropdown during
+// this Log/Edit Patrol session, as opposed to it just being pre-filled from
+// the existing record (see logPatrol()'s edit branch for why this matters).
+var commanderManuallyChanged=false;
 var editingPatrolId=null;
 // Reserved troops (already in another unlogged patrol draft, an unlogged
 // duty draft, or an active/upcoming duty) must not be selectable for a
 // new patrol log (Priority 1: "not be selectable for other activities").
 // Excludes the draft actually being logged right now (pendingDraftLogId),
 // since its own troops are already in selectedTroops anyway.
-// Checked against the date actually entered in the form (p-date) — not
-// "right now" — so a patrol being logged for a future date correctly
-// follows the same "future date = free of duty-based reservation" rule
-// isTroopReserved's patrolMode already applies everywhere else (Suggest
-// Team, the patrol draft editor). Without this, typing a name into this
-// box while logging tomorrow's patrol was silently checking today's
-// live duty status instead, wrongly hiding troops who are only busy
-// right now and wrongly missing ones who are actually busy that day.
-function troopSuggest(val){ var box=document.getElementById('troop-suggest'); if(!val||val.length===0){box.style.display='none';return;} var q=val.toLowerCase(); var pDate=parseDate(document.getElementById('p-date').value)||null; var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){return (t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)>=0&&selectedTroops.indexOf(t.id)<0&&!isTroopReserved(t.id,{excludePatrolDraftId:pendingDraftLogId,date:pDate,patrolMode:true});}); if(matches.length===0){box.style.display='none';return;} box.style.display='block'; box.innerHTML=matches.slice(0,8).map(function(t){ return '<div class="suggest-item" onclick="addTroopToPatrol(\''+t.id+'\')">'+'<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+' <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span></div>'; }).join(''); }
+function troopSuggest(val){ var box=document.getElementById('troop-suggest'); if(!val||val.length===0){box.style.display='none';return;} var q=val.toLowerCase(); var matches=sortTroops(D.troops.filter(isAvailable)).filter(function(t){return (t.rank+' '+t.name+' '+t.unit).toLowerCase().indexOf(q)>=0&&selectedTroops.indexOf(t.id)<0&&!isTroopReserved(t.id,{excludePatrolDraftId:pendingDraftLogId,patrolMode:true});}); if(matches.length===0){box.style.display='none';return;} box.style.display='block'; box.innerHTML=matches.slice(0,8).map(function(t){ return '<div class="suggest-item" onclick="addTroopToPatrol(\''+t.id+'\')">'+'<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+' <span style="color:var(--text-muted);font-size:11px;">('+t.unit+')</span></div>'; }).join(''); }
 function addTroopToPatrol(id){ if(selectedTroops.indexOf(id)<0) selectedTroops.push(id); document.getElementById('troop-search').value=''; document.getElementById('troop-suggest').style.display='none'; renderSelected(); }
-function removeTroopFromPatrol(id){ selectedTroops=selectedTroops.filter(function(x){return x!==id;}); if(selectedCommander===id) selectedCommander=null; renderSelected(); }
+// Removing the current commander from the roster (via this × button, not
+// the Commander dropdown itself) also counts as a real change to the
+// commander state — without commanderManuallyChanged=true here, saving an
+// edit where the manually-chosen commander was removed this way would keep
+// commanderAuto===false (still "manually protected") while commander is
+// now null, permanently stuck with no commander and no way for
+// migrateCommanders() to ever fill it back in again.
+function removeTroopFromPatrol(id){ selectedTroops=selectedTroops.filter(function(x){return x!==id;}); if(selectedCommander===id){ selectedCommander=null; commanderManuallyChanged=true; } renderSelected(); }
 function renderCommanderDropdown(){
   var wrap=document.getElementById('commander-field-wrap');
   var sel=document.getElementById('p-commander');
@@ -9258,7 +9285,12 @@ function renderCommanderDropdown(){
   wrap.style.display='';
   var opts=sortTroops(D.troops.filter(function(t){return selectedTroops.indexOf(t.id)>=0;}));
   sel.innerHTML='<option value="">-- None --</option>'+opts.map(function(t){return '<option value="'+t.id+'"'+(selectedCommander===t.id?' selected':'')+'>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</option>';}).join('');
-  if(selectedCommander&&selectedTroops.indexOf(selectedCommander)<0){ selectedCommander=null; sel.value=''; }
+  // Same reasoning as removeTroopFromPatrol()'s fix above: if the
+  // commander fell out of sync with the roster through some other path
+  // (not the × button), clearing it here must also count as a real
+  // change — otherwise an edit could still save with commanderAuto still
+  // stuck at false and a commander that's already null.
+  if(selectedCommander&&selectedTroops.indexOf(selectedCommander)<0){ selectedCommander=null; commanderManuallyChanged=true; sel.value=''; }
 }
 function renderSelected(){
   var el=document.getElementById('selected-troops');
@@ -9294,6 +9326,7 @@ function editPatrol(id){
   editingPatrolId=id;
   selectedTroops=(p.troops||[]).slice();
   selectedCommander=p.commander||null;
+  commanderManuallyChanged=false; // pre-filled from the record, not yet touched by the user
   document.getElementById('p-date').value=fmtDate(p.date);
   document.getElementById('p-type').value=p.type||'';
   document.getElementById('p-area').value=p.area||'';
@@ -9308,7 +9341,7 @@ function editPatrol(id){
 function cancelEditPatrol(){
   editingPatrolId=null;
   pendingDraftLogId=null;
-  selectedTroops=[]; selectedCommander=null;
+  selectedTroops=[]; selectedCommander=null; commanderManuallyChanged=false;
   document.getElementById('p-date').value=''; document.getElementById('p-area').value=''; document.getElementById('p-dur').value=''; document.getElementById('p-route').value=''; document.getElementById('p-rem').value='';
   renderSelected();
   document.getElementById('p-submit-btn').textContent='⚡ Log Patrol';
@@ -9331,7 +9364,21 @@ function logPatrol(){
     var ep=D.patrols.find(function(x){return x.id===editingPatrolId;});
     if(!ep){editingPatrolId=null;showAlert('log-alert','Patrol no longer exists.','danger');return;}
     ep.date=date; ep.type=type; ep.area=area; ep.duration=dur; ep.route=route; ep.remarks=rem;
-    ep.troops=selectedTroops.slice(); ep.commander=selectedCommander||null; ep.commanderAuto=selectedCommander?false:ep.commanderAuto;
+    ep.troops=selectedTroops.slice();
+    // BUG FIX: this used to be `ep.commanderAuto=selectedCommander?false:ep.commanderAuto;`
+    // — since editPatrol() pre-fills selectedCommander from the record being
+    // edited, selectedCommander is truthy on almost every edit whether or
+    // not the person ever touched the Commander dropdown. That meant saving
+    // ANY edit (even just fixing a typo in Remarks) silently converted an
+    // auto-assigned commander into a permanently manual one, defeating
+    // migrateCommanders()'s self-healing (it never re-picks once
+    // commanderAuto===false). Only actually changing the dropdown
+    // (commanderManuallyChanged) should affect this: picking someone locks
+    // it manual; clearing it back to "-- None --" hands it back to
+    // auto-assignment (null, picked up on the next migration pass); leaving
+    // it untouched preserves whatever the record already had.
+    ep.commander=selectedCommander||null;
+    ep.commanderAuto=commanderManuallyChanged?(selectedCommander?false:null):ep.commanderAuto;
     ep.ptlId=patrolDisplayId(ep); // keep the displayed year in sync if the date changed
     remoteSavePatrol(ep);
     audit('Patrol edited: '+ep.ptlId+' | '+type+' | '+(area||'No sector'));
@@ -9358,21 +9405,7 @@ function logPatrol(){
     // patrol instead of creating a duplicate.
     if(dup){
       var goEdit=confirm('A patrol already exists for this date and type ('+(dup.ptlId||dup.id)+') with mostly the same troops — likely the same patrol.\n\nPress OK to edit that existing patrol instead (recommended). Press Cancel to log this as a genuinely separate new patrol anyway.');
-      if(goEdit){
-        // This branch merges into the existing patrol instead of falling
-        // through to the normal "new patrol" path below, so it must do its
-        // own draft cleanup here — otherwise a draft logged into a duplicate
-        // never gets removed from D.drafts and keeps reappearing after sync.
-        var mergedDraftId=pendingDraftLogId;
-        pendingDraftLogId=null;
-        if(mergedDraftId){
-          D.drafts=D.drafts.filter(function(d){return d.id!==mergedDraftId;});
-          remoteSaveConfig();
-          updateDraftsBadge();
-        }
-        editPatrol(dup.id);
-        return;
-      }
+      if(goEdit){ pendingDraftLogId=null; editPatrol(dup.id); return; }
     }
     var newPatrol={id:uid('p'),ptlSeq:nextPtlSeq(),date:date,type:type,troops:selectedTroops.slice(),duration:dur,area:area,route:route,remarks:rem,commander:selectedCommander||null,commanderAuto:selectedCommander?false:null};
     newPatrol.ptlId=patrolDisplayId(newPatrol);
@@ -9391,8 +9424,23 @@ function logPatrol(){
     }
   }
   document.getElementById('p-dur').value=''; document.getElementById('p-area').value=''; document.getElementById('p-route').value=''; document.getElementById('p-rem').value='';
-  selectedTroops=[]; selectedCommander=null; renderSelected(); updatePtlPreview();
+  selectedTroops=[]; selectedCommander=null; commanderManuallyChanged=false; renderSelected(); updatePtlPreview();
   document.getElementById('app-main').scrollTop=0;
+  // BUG FIX: logPatrol() mutates D.patrols directly (both the new-patrol
+  // and edit-existing branches above) but never told the Patrol Log list
+  // or Dashboard to redraw — unlike every delete path (confirmDel), which
+  // already re-renders whichever section is currently active. The Log
+  // Patrol modal is opened as an overlay ON TOP of whatever section the
+  // user was already viewing (Patrol Log, or the Dashboard via Suggest
+  // Team/Drafts), so without this, a freshly logged patrol wouldn't show
+  // up in the list behind the modal, and editing an existing patrol's
+  // card wouldn't visibly update, until the user switched sections away
+  // and back (or changed a filter) to force an unrelated re-render.
+  var _activeSection=document.querySelector('.section.active');
+  if(_activeSection){
+    if(_activeSection.id==='dashboard') renderDash();
+    if(_activeSection.id==='patrol-log') renderTable();
+  }
 }
 
 // =====================================================================
@@ -10640,7 +10688,7 @@ function doExport(){ var backup={version:4,exportDate:new Date().toISOString(),e
 function dlFile(content,type,filename){ var blob=new Blob([content],{type:type}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a);a.click(); document.body.removeChild(a);URL.revokeObjectURL(a.href); }
 var pendingRestore=null;
 function previewRestore(input){ var file=input.files[0]; if(!file) return; var reader=new FileReader(); reader.onload=function(e){ try{var backup=JSON.parse(e.target.result);if(!backup.data) throw new Error('Invalid');pendingRestore=backup;var d=backup.data;var prev=document.getElementById('restore-preview');prev.style.display='';prev.className='alert al-info';prev.innerHTML='Valid backup: <strong>'+(backup.exportDate?backup.exportDate.slice(0,10):'?')+'</strong><br>Troops: <strong>'+(d.troops||[]).length+'</strong> · Archived: <strong>'+(d.archived||[]).length+'</strong> · Patrols: <strong>'+(d.patrols||[]).length+'</strong><br><strong style="color:#ff9999;">This will overwrite all current data.</strong>';document.getElementById('restore-btn').style.display='';document.getElementById('restore-cancel').style.display='';}catch(err){var prev=document.getElementById('restore-preview');prev.style.display='';prev.className='alert al-danger';prev.innerHTML='Invalid backup file.';document.getElementById('restore-btn').style.display='none';document.getElementById('restore-cancel').style.display='none';} }; reader.readAsText(file); }
-function doRestore(){ if(!pendingRestore||!pendingRestore.data){alert('No valid backup.');return;} D=pendingRestore.data; if(!D.archived) D.archived=[]; if(!D.counter) D.counter=D.patrols.length+1; if(!D.audit) D.audit=[]; if(!D.settings) D.settings={pob:'',mission:'',commander:'',classification:'CONFIDENTIAL'}; if(!D.config) D.config={types:DEFAULT_TYPES.slice(),sectors:DEFAULT_SECTORS.slice(),routes:DEFAULT_ROUTES.slice(),ranks:DEFAULT_RANKS.slice()}; if(!D.config.ranks) D.config.ranks=DEFAULT_RANKS.slice(); if(!D.drafts) D.drafts=[]; migrateDutySystem(); RANKS=D.config.ranks; D.troops.forEach(function(t){if(!t.status)t.status='available';if(!t.notes)t.notes='';}); migratePatrolSeq(); migrateDutySeq(); saveData(); var allTroops=D.troops.concat(D.archived); Promise.all(allTroops.map(function(t){return apiFetch('/troops',{method:'POST',body:JSON.stringify(t)}).catch(function(){});}).concat(D.patrols.map(function(p){return remoteSavePatrol(p);})).concat((D.duties||[]).map(function(d){return remoteSaveDuty(d,true);}))).then(function(){return remoteSaveConfig();}); D.archived.forEach(function(t){apiFetch('/troops/'+t.id+'/archive',{method:'PATCH',body:JSON.stringify({archived:true,archivedDate:t.archivedDate})}).catch(function(){});}); document.getElementById('restore-alert').innerHTML='<div class="alert al-success">Restore successful!</div>'; cancelRestore(); applySettings(); populateDropdowns(); populateRankDropdowns(); renderDash(); renderSysInfo(); updateDraftsBadge(); updateDutyDraftsBadge(); audit('Data restored from backup'); setTimeout(function(){document.getElementById('restore-alert').innerHTML='';},5000); }
+function doRestore(){ if(!pendingRestore||!pendingRestore.data){alert('No valid backup.');return;} D=pendingRestore.data; if(!D.archived) D.archived=[]; if(!D.counter) D.counter=D.patrols.length+1; if(!D.audit) D.audit=[]; if(!D.settings) D.settings={pob:'',mission:'',commander:'',classification:'CONFIDENTIAL'}; if(!D.config) D.config={types:DEFAULT_TYPES.slice(),sectors:DEFAULT_SECTORS.slice(),routes:DEFAULT_ROUTES.slice(),ranks:DEFAULT_RANKS.slice()}; if(!D.config.ranks) D.config.ranks=DEFAULT_RANKS.slice(); if(!D.drafts) D.drafts=[]; migrateDutySystem(); RANKS=D.config.ranks; D.troops.forEach(function(t){if(!t.status)t.status='available';if(!t.notes)t.notes='';}); migratePatrolSeq(); migrateDutySeq(); saveData(); var allTroops=D.troops.concat(D.archived); Promise.all(allTroops.map(function(t){return apiFetch('/troops',{method:'POST',body:JSON.stringify(t)}).catch(function(){});}).concat(D.patrols.map(function(p){return remoteSavePatrol(p);})).concat((D.duties||[]).map(function(d){return remoteSaveDuty(d);}))).then(function(){return remoteSaveConfig();}); D.archived.forEach(function(t){apiFetch('/troops/'+t.id+'/archive',{method:'PATCH',body:JSON.stringify({archived:true,archivedDate:t.archivedDate})}).catch(function(){});}); document.getElementById('restore-alert').innerHTML='<div class="alert al-success">Restore successful!</div>'; cancelRestore(); applySettings(); populateDropdowns(); populateRankDropdowns(); renderDash(); renderSysInfo(); updateDraftsBadge(); updateDutyDraftsBadge(); audit('Data restored from backup'); setTimeout(function(){document.getElementById('restore-alert').innerHTML='';},5000); }
 function cancelRestore(){ pendingRestore=null; document.getElementById('restore-file').value=''; document.getElementById('restore-preview').style.display='none'; document.getElementById('restore-btn').style.display='none'; document.getElementById('restore-cancel').style.display='none'; }
 function renderSysInfo(){ var sz=JSON.stringify(D).length; document.getElementById('sys-info').innerHTML='Version: v4 (Mobile)<br>Active Troops: '+D.troops.length+'<br>Archived Troops: '+(D.archived||[]).length+'<br>Total Patrols: '+D.patrols.length+'<br>Total Hours: '+D.patrols.reduce(function(s,p){return s+(parseFloat(p.duration)||0);},0).toFixed(1)+'h<br>Patrol Types: '+D.config.types.length+'<br>Sectors: '+D.config.sectors.length+'<br>Audit Entries: '+D.audit.length+'<br>Next Patrol ID: PTL-'+new Date().getFullYear()+'-'+String(D.counter).padStart(3,'0')+'<br>Storage Used: ~'+(sz/1024).toFixed(1)+' KB<br>API: '+API_URL; }
 
