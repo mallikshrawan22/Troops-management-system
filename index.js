@@ -398,6 +398,116 @@ async function migrateSchema() {
         }
       }
     }
+    // Patrol drafts used to live as one big JSON array under
+    // app_config.key='drafts', overwritten wholesale on every /config
+    // save — the exact same fault class already fixed for duties above:
+    // ANY unrelated save on ANY device (renaming a rank, editing a
+    // setting, editing a duty draft, etc.) resent that device's own
+    // possibly-stale in-memory copy of the whole drafts array, silently
+    // erasing a patrol draft saved moments earlier from a different
+    // device or sync cycle — this was the actual cause of "a saved
+    // patrol draft vanished overnight". Moving drafts to their own
+    // table with one row per draft (same pattern as duties, upserted by
+    // id via ON CONFLICT) makes each draft an independent write, so two
+    // devices saving/deleting different drafts at the same time can
+    // never clobber each other again.
+    await pool.query(`CREATE TABLE IF NOT EXISTS patrol_drafts (
+      id TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      troops JSONB DEFAULT '[]',
+      slots JSONB DEFAULT '[]',
+      planned_date DATE,
+      type TEXT
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_patrol_drafts_planned_date ON patrol_drafts(planned_date)');
+    // One-time cutover: if drafts were previously stored in app_config
+    // (old format) and the new table is still empty, copy them across so
+    // nobody's existing saved-but-unlogged patrol draft is lost when this
+    // upgrade deploys.
+    const { rows: draftCountRows } = await pool.query('SELECT COUNT(*)::int AS c FROM patrol_drafts');
+    if (draftCountRows[0].c === 0) {
+      const { rows: oldDraftRows } = await pool.query(`SELECT value FROM app_config WHERE key = 'drafts'`);
+      if (oldDraftRows.length > 0) {
+        let oldDrafts = oldDraftRows[0].value;
+        if (typeof oldDrafts === 'string') { try { oldDrafts = JSON.parse(oldDrafts); } catch (e) { oldDrafts = []; } }
+        if (Array.isArray(oldDrafts) && oldDrafts.length > 0) {
+          for (const d of oldDrafts) {
+            if (!d || !d.id) continue;
+            await pool.query(
+              `INSERT INTO patrol_drafts (id, created_at, troops, slots, planned_date, type)
+               VALUES ($1,$2,$3,$4,$5,$6)
+               ON CONFLICT (id) DO NOTHING`,
+              [d.id, d.createdAt || new Date().toISOString(), JSON.stringify(d.troops || []), JSON.stringify(Array.isArray(d.slots) ? d.slots : []), d.plannedDate || null, d.type || null]
+            );
+          }
+          console.log('Migrated', oldDrafts.length, 'patrol drafts from app_config into the new patrol_drafts table.');
+        }
+      }
+    }
+    // Duty Drafts and Contingency (exclusion) Groups had the exact same
+    // fault as patrol drafts above — one whole-array JSON blob per key
+    // under app_config, overwritten wholesale by ANY unrelated /config
+    // save from ANY device. Same fix: their own table, one row per
+    // record, upserted by id.
+    await pool.query(`CREATE TABLE IF NOT EXISTS duty_drafts (
+      id TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      planned_date DATE,
+      period TEXT,
+      records JSONB DEFAULT '[]',
+      roaming_rotation_preview JSONB
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_duty_drafts_planned_date ON duty_drafts(planned_date)');
+    const { rows: dutyDraftCountRows } = await pool.query('SELECT COUNT(*)::int AS c FROM duty_drafts');
+    if (dutyDraftCountRows[0].c === 0) {
+      const { rows: oldDutyDraftRows } = await pool.query(`SELECT value FROM app_config WHERE key = 'dutyDrafts'`);
+      if (oldDutyDraftRows.length > 0) {
+        let oldDutyDrafts = oldDutyDraftRows[0].value;
+        if (typeof oldDutyDrafts === 'string') { try { oldDutyDrafts = JSON.parse(oldDutyDrafts); } catch (e) { oldDutyDrafts = []; } }
+        if (Array.isArray(oldDutyDrafts) && oldDutyDrafts.length > 0) {
+          for (const d of oldDutyDrafts) {
+            if (!d || !d.id) continue;
+            await pool.query(
+              `INSERT INTO duty_drafts (id, created_at, planned_date, period, records, roaming_rotation_preview)
+               VALUES ($1,$2,$3,$4,$5,$6)
+               ON CONFLICT (id) DO NOTHING`,
+              [d.id, d.createdAt || new Date().toISOString(), d.plannedDate || null, d.period || null, JSON.stringify(Array.isArray(d.records) ? d.records : []), d.roamingRotationPreview ? JSON.stringify(d.roamingRotationPreview) : null]
+            );
+          }
+          console.log('Migrated', oldDutyDrafts.length, 'duty drafts from app_config into the new duty_drafts table.');
+        }
+      }
+    }
+    await pool.query(`CREATE TABLE IF NOT EXISTS duty_contingency (
+      id TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reason TEXT,
+      shift TEXT,
+      start_date DATE,
+      end_date DATE,
+      troop_ids JSONB DEFAULT '[]',
+      active BOOLEAN DEFAULT TRUE
+    )`);
+    const { rows: cgCountRows } = await pool.query('SELECT COUNT(*)::int AS c FROM duty_contingency');
+    if (cgCountRows[0].c === 0) {
+      const { rows: oldCgRows } = await pool.query(`SELECT value FROM app_config WHERE key = 'dutyContingency'`);
+      if (oldCgRows.length > 0) {
+        let oldCg = oldCgRows[0].value;
+        if (typeof oldCg === 'string') { try { oldCg = JSON.parse(oldCg); } catch (e) { oldCg = []; } }
+        if (Array.isArray(oldCg) && oldCg.length > 0) {
+          for (const g of oldCg) {
+            if (!g || !g.id) continue;
+            await pool.query(
+              `INSERT INTO duty_contingency (id, created_at, reason, shift, start_date, end_date, troop_ids, active)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+               ON CONFLICT (id) DO NOTHING`,
+              [g.id, g.createdAt || new Date().toISOString(), g.reason || '', g.shift || 'full', g.startDate || null, g.endDate || null, JSON.stringify(g.troopIds || []), g.active !== false]
+            );
+          }
+          console.log('Migrated', oldCg.length, 'contingency groups from app_config into the new duty_contingency table.');
+        }
+      }
+    }
     // Device sessions (multi-device sign-in/sign-out) — each device that
     // logs in with the shared master key gets its own row here and its own
     // token, so any device can be individually or collectively signed out
@@ -425,7 +535,7 @@ async function migrateSchema() {
 
 // ── VERSION (bump this string on every backend deploy) ─────────────────
 // Left open — reveals nothing about your data.
-const API_VERSION = '2026.07.26.1-duties-fix';
+const API_VERSION = '2026.09.19.2-duty-drafts-contingency-fix';
 app.get('/version', (_, res) => res.json({ version: API_VERSION }));
 
 // ── HEALTH ────────────────────────────────────────────────────────────
@@ -708,6 +818,114 @@ app.delete('/duties/:id', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
 });
 
+// ── PATROL DRAFTS ─────────────────────────────────────────────────────
+// One row per draft, upserted by id — same pattern as /duties. This
+// replaces the old app_config 'drafts' key, which stored the entire
+// draft list as one JSON blob that got overwritten wholesale on every
+// unrelated /config save from any device (see migrateSchema comment
+// above). Per-record writes mean two devices saving or deleting
+// different drafts at the same time can never wipe each other out.
+app.get('/patrol-drafts', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM patrol_drafts ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+app.post('/patrol-drafts', async (req, res) => {
+  try {
+    const { id, createdAt, troops, slots, plannedDate, type } = req.body;
+    if (!isValidId(id)) return res.status(400).json({ error: 'Invalid draft id.' });
+    if (!Array.isArray(troops) || !troops.every(t => typeof t === 'string' && t.length <= 100)) {
+      return res.status(400).json({ error: 'Invalid troops list.' });
+    }
+    await pool.query(
+      `INSERT INTO patrol_drafts (id, created_at, troops, slots, planned_date, type)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (id) DO UPDATE
+         SET troops=$3, slots=$4, planned_date=$5, type=$6`,
+      [id, createdAt || new Date().toISOString(), JSON.stringify(troops || []), JSON.stringify(Array.isArray(slots) ? slots : []), plannedDate || null, type ? clip(type, 50) : null]
+    );
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+app.delete('/patrol-drafts/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM patrol_drafts WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+// ── DUTY DRAFTS ────────────────────────────────────────────────────────
+// Same pattern/reason as /patrol-drafts above — one row per draft,
+// upserted by id, replacing the old app_config 'dutyDrafts' whole-array
+// key.
+app.get('/duty-drafts', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM duty_drafts ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+app.post('/duty-drafts', async (req, res) => {
+  try {
+    const { id, createdAt, plannedDate, period, records, roamingRotationPreview } = req.body;
+    if (!isValidId(id)) return res.status(400).json({ error: 'Invalid duty draft id.' });
+    await pool.query(
+      `INSERT INTO duty_drafts (id, created_at, planned_date, period, records, roaming_rotation_preview)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (id) DO UPDATE
+         SET planned_date=$3, period=$4, records=$5, roaming_rotation_preview=$6`,
+      [id, createdAt || new Date().toISOString(), plannedDate || null, period ? clip(period, 20) : null, JSON.stringify(Array.isArray(records) ? records : []), roamingRotationPreview ? JSON.stringify(roamingRotationPreview) : null]
+    );
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+app.delete('/duty-drafts/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM duty_drafts WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+// ── DUTY CONTINGENCY (EXCLUSION) GROUPS ──────────────────────────────────
+// Same pattern/reason as /patrol-drafts above — one row per group,
+// upserted by id, replacing the old app_config 'dutyContingency'
+// whole-array key.
+app.get('/duty-contingency', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM duty_contingency ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+app.post('/duty-contingency', async (req, res) => {
+  try {
+    const { id, createdAt, reason, shift, startDate, endDate, troopIds, active } = req.body;
+    if (!isValidId(id)) return res.status(400).json({ error: 'Invalid contingency group id.' });
+    if (!Array.isArray(troopIds) || !troopIds.every(t => typeof t === 'string' && t.length <= 100)) {
+      return res.status(400).json({ error: 'Invalid troop id list.' });
+    }
+    await pool.query(
+      `INSERT INTO duty_contingency (id, created_at, reason, shift, start_date, end_date, troop_ids, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (id) DO UPDATE
+         SET reason=$3, shift=$4, start_date=$5, end_date=$6, troop_ids=$7, active=$8`,
+      [id, createdAt || new Date().toISOString(), clip(reason || '', 500), clip(shift || 'full', 20), startDate || null, endDate || null, JSON.stringify(troopIds || []), active !== false]
+    );
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+app.delete('/duty-contingency/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM duty_contingency WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
 // ── AUDIT LOG ─────────────────────────────────────────────────────────
 app.get('/audit', async (req, res) => {
   try {
@@ -804,6 +1022,9 @@ app.post('/factory-reset', async (req, res) => {
     const scope = (req.body && req.body.scope === 'full') ? 'full' : 'data';
     await pool.query('DELETE FROM patrols');
     await pool.query('DELETE FROM troops');
+    await pool.query('DELETE FROM patrol_drafts');
+    await pool.query('DELETE FROM duty_drafts');
+    await pool.query('DELETE FROM duty_contingency');
     await pool.query(`DELETE FROM app_config WHERE key IN ('drafts','dutyContingency','dutyDrafts')`);
     await pool.query('DELETE FROM duties');
     await pool.query(`INSERT INTO app_config (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2`, ['counter', JSON.stringify(1)]);
