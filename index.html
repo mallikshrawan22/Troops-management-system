@@ -1031,9 +1031,10 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
     </div>
   </div>
   <div class="header-right">
-    <button class="sync-dot-btn" id="sync-pill" onclick="manualSync()" title="Sync status — tap to sync now">
+    <button class="sync-dot-btn" id="sync-pill" onclick="syncPillTap()" title="Sync status — tap to sync now">
       <span class="sync-dot" id="sync-dot"></span>
       <span class="pending-badge" id="pending-badge" style="display:none;"></span>
+      <span class="pending-badge" id="failed-badge" style="display:none;left:-5px;right:auto;background:var(--red-light);color:#2a0a0a;">!</span>
     </button>
     <button class="icon-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle Theme">☀</button>
   </div>
@@ -1369,6 +1370,21 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <button class="btn btn-ghost btn-sm" onclick="closeDutyDraftsModal()">Close</button>
     </div>
     <div id="duty-drafts-list"></div>
+  </div>
+</div>
+
+<!-- Failed-writes review — saves that the server explicitly rejected (not
+     just "offline"), so blind auto-retry would never succeed. These sit
+     here until a person reviews them, instead of being silently dropped
+     from the outbox and forgotten (the old, dangerous behavior). -->
+<div class="modal-ov" id="failed-writes-modal">
+  <div class="modal" style="max-width:640px;">
+    <div class="card-title modal-hdr-sticky">
+      <span>⚠️ Unsaved Changes Needing Attention</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeFailedWritesModal()">Close</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">These changes are still on THIS device only — the server rejected them and auto-retry won't help, so they're kept here until you decide. "Retry" tries the save again as-is (use this if the problem was temporary, e.g. you were signed out). "Discard" gives up on this specific change permanently.</div>
+    <div id="failed-writes-list"></div>
   </div>
 </div>
 
@@ -3271,6 +3287,95 @@ function updatePendingBadge(){
   var badge=document.getElementById('pending-badge');
   if(badge){ badge.textContent=n; badge.style.display=n>0?'flex':'none'; }
 }
+
+// ── FAILED WRITES (server EXPLICITLY rejected these — retrying the exact
+// same payload forever would never work) ──────────────────────────────
+// These used to be silently dropped from the outbox the instant the server
+// rejected them, with only a console.error nobody ever saw — which is
+// exactly how a logged duty roster could vanish with zero warning. Now a
+// genuine rejection moves the item here instead of deleting it, and it
+// stays here — visible, and blocking a pull from overwriting that same
+// resource type — until a person reviews it via the ⚠️ badge and either
+// retries or explicitly discards it.
+var FAILED_KEY = SK+'_failed';
+function loadFailed(){ try{ return JSON.parse(localStorage.getItem(FAILED_KEY)||'[]'); }catch(e){ return []; } }
+function saveFailed(list){ localStorage.setItem(FAILED_KEY, JSON.stringify(list)); updateFailedBadge(); }
+function addFailed(kind,payload,errMsg){
+  var list=loadFailed();
+  list.push({id:uid('fail'),kind:kind,payload:payload,ts:Date.now(),error:errMsg||'Rejected by server'});
+  saveFailed(list);
+  showFailureAlert((kind.indexOf('duty')>=0||kind.indexOf('Duty')>=0?'A duty change':'A change')+' was rejected by the server and NOT saved. Tap the ⚠️ next to the sync dot to review.');
+}
+function updateFailedBadge(){
+  var n=loadFailed().length;
+  var badge=document.getElementById('failed-badge');
+  if(badge){ badge.textContent=n>9?'9+':n; badge.style.display=n>0?'flex':'none'; }
+}
+// Tapping the sync pill opens the failed-writes review first if anything
+// needs attention — that's more urgent than a manual sync — else syncs.
+function syncPillTap(){
+  if(loadFailed().length>0){ openFailedWritesModal(); return; }
+  manualSync();
+}
+function openFailedWritesModal(){ renderFailedWritesList(); document.getElementById('failed-writes-modal').classList.add('open'); }
+function closeFailedWritesModal(){ document.getElementById('failed-writes-modal').classList.remove('open'); }
+function renderFailedWritesList(){
+  var el=document.getElementById('failed-writes-list');
+  var list=loadFailed();
+  if(list.length===0){ el.innerHTML='<div style="padding:24px 4px;text-align:center;color:var(--text-muted);font-size:13.5px;">Nothing pending — every change has been saved.</div>'; return; }
+  el.innerHTML=list.slice().reverse().map(function(f){
+    var d=new Date(f.ts);
+    var ts=String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    return '<div style="padding:12px 0;border-bottom:1px solid var(--border);">'+
+      '<div style="font-weight:700;font-size:13px;">'+escHtml(f.kind)+'</div>'+
+      '<div style="font-size:11.5px;color:var(--text-muted);margin:2px 0 6px;">'+ts+' · '+escHtml(f.error)+'</div>'+
+      '<div style="display:flex;gap:8px;">'+
+        '<button class="btn btn-ghost btn-sm" onclick="retryFailedWrite(\''+f.id+'\')">🔁 Retry</button>'+
+        '<button class="btn btn-ghost btn-sm" style="color:var(--red-light);border-color:var(--red-light);" onclick="discardFailedWrite(\''+f.id+'\')">🗑️ Discard</button>'+
+      '</div></div>';
+  }).join('');
+}
+function retryFailedWrite(id){
+  var list=loadFailed();
+  var f=list.find(function(x){return x.id===id;});
+  if(!f) return;
+  replayOp(f).then(function(){
+    saveFailed(loadFailed().filter(function(x){return x.id!==id;}));
+    renderFailedWritesList();
+    manualSync();
+  }).catch(function(e){
+    f.error=(e&&e.data&&e.data.error)||e.message||'Rejected by server';
+    f.ts=Date.now();
+    saveFailed(list);
+    renderFailedWritesList();
+    showFailureAlert('Retry failed again: '+f.error);
+  });
+}
+function discardFailedWrite(id){
+  if(!confirm('Permanently give up on this change? It will NOT be saved to the server.')) return;
+  saveFailed(loadFailed().filter(function(x){return x.id!==id;}));
+  renderFailedWritesList();
+}
+// Persistent (does not auto-hide) failure banner — distinct from
+// showSyncStrip's normal 2.2s status flash, because a rejected write needs
+// a person to actually notice and act, not a status blip that's gone
+// before they look up from what they're doing.
+function showFailureAlert(text){
+  var strip=document.getElementById('sync-status-strip');
+  if(!strip) return;
+  strip.textContent=text+'  (tap ⚠️ to review)';
+  strip.style.background='#b91c2c22';
+  strip.style.color='#f2495a';
+  strip.style.borderBottom='1px solid #b91c2c55';
+  strip.style.pointerEvents='auto';
+  strip.style.cursor='pointer';
+  strip.onclick=function(){ openFailedWritesModal(); };
+  strip.classList.add('show');
+  if(_stripTimer) clearTimeout(_stripTimer);
+  // No auto-hide timer here (unlike showSyncStrip) — stays up until the
+  // person taps it or dismisses it, or the underlying items get resolved.
+}
+
 function replayOp(op){
   switch(op.kind){
     case 'saveTroop': return apiFetch('/troops',{method:'POST',body:JSON.stringify(op.payload)});
@@ -3285,8 +3390,9 @@ function replayOp(op){
     default: return Promise.resolve();
   }
 }
-// Replays queued ops one-by-one, oldest first. Stops (keeping the rest queued) the moment one fails,
-// since that almost always means connectivity dropped again mid-flush.
+// Replays queued ops one-by-one, oldest first. Stops (keeping the rest queued) the moment one fails
+// for a retryable (offline/signed-out) reason, since that almost always means connectivity dropped
+// again mid-flush. A genuine rejection no longer silently deletes the item — see addFailed() above.
 function flushOutbox(){
   var q=loadOutbox();
   if(q.length===0) return Promise.resolve(true);
@@ -3303,13 +3409,14 @@ function flushOutbox(){
     // outbox the moment a background sync ran while signed out, right
     // before pulling the server's copy over local state -- which is what
     // made logged duties vanish on sync. Only a true 4xx data/validation
-    // rejection (400, 404, 413, 422, etc.) should ever drop an item.
+    // rejection (400, 404, 413, 422, etc.) should ever leave the retry queue.
     if(e && e.status && e.status!==401 && e.status>=400 && e.status<500){
       // A genuine rejection (bad data) — retrying the exact same payload
-      // forever would never succeed and would block every future sync.
-      // Drop just this one item and keep going.
-      console.error('Server rejected a queued change — dropping it so sync can continue:',op,e);
+      // forever would never succeed and would block every future sync item
+      // behind it. Move it out of the retry queue and into the reviewable
+      // failed-writes list instead of deleting it outright.
       var q2=loadOutbox(); q2.shift(); saveOutbox(q2);
+      addFailed(op.kind,op.payload,(e&&e.data&&e.data.error)||e.message||('Server rejected with status '+e.status));
       return flushOutbox();
     }
     console.warn('Outbox flush paused (offline, or signed out — will retry once reconnected/signed in)',e);
@@ -3420,6 +3527,12 @@ function showSyncStrip(text,color){
   strip.style.background=color+'22';
   strip.style.color=color;
   strip.style.borderBottom='1px solid '+color+'55';
+  // Clear anything a previous showFailureAlert() left behind (its click
+  // handler, cursor, and non-auto-hide pointer-events) so a routine status
+  // update afterward doesn't leave a stale "tap to review" banner behind.
+  strip.onclick=null;
+  strip.style.cursor='';
+  strip.style.pointerEvents='';
   strip.classList.add('show');
   if(_stripTimer) clearTimeout(_stripTimer);
   _stripTimer=setTimeout(function(){ strip.classList.remove('show'); }, 2200);
@@ -3444,6 +3557,7 @@ function setSyncState(state) {
     dot.style.background='var(--text-muted)';dot.style.boxShadow='none';
   }
   updatePendingBadge();
+  updateFailedBadge();
 }
 
 function startCountdown() {
@@ -3466,8 +3580,16 @@ function pullFromServer(pendingOutbox){
   // from being overwritten by this pull -- everything else still gets the
   // server's latest copy, including drafts, even while something unrelated
   // is stuck. See backgroundSync() for why this matters.
+  // A rejected write that's sitting in the failed-writes list (waiting for
+  // a person to retry or discard it — see addFailed()) protects its
+  // resource type from being overwritten here exactly like a still-queued
+  // outbox item does. Without this, the very act of a write being flagged
+  // as "needs review" would let the NEXT pull immediately erase the local
+  // evidence of it before anyone got a chance to look — silently
+  // defeating the whole point of keeping it around for review.
   var pendingKinds={};
   (pendingOutbox||[]).forEach(function(op){ pendingKinds[op.kind]=true; });
+  loadFailed().forEach(function(f){ pendingKinds[f.kind]=true; });
   var skipTroops=pendingKinds.saveTroop||pendingKinds.deleteTroop||pendingKinds.archiveTroop;
   var skipPatrols=pendingKinds.savePatrol||pendingKinds.deletePatrol;
   var skipDuties=pendingKinds.saveDuty||pendingKinds.deleteDuty;
@@ -3587,10 +3709,27 @@ function _trackWrite(promise){
   _pendingWrites++;
   return promise.then(function(r){ _pendingWrites--; return r; }, function(e){ _pendingWrites--; throw e; });
 }
-function remoteSaveTroop(t){ saveData(); return _trackWrite(apiFetch('/troops',{method:'POST',body:JSON.stringify(t)}).catch(function(e){console.error('saveTroop failed',e); queueOp('saveTroop',t);})); }
-function remoteDeleteTroop(id){ saveData(); return _trackWrite(apiFetch('/troops/'+id,{method:'DELETE'}).catch(function(e){console.error(e); queueOp('deleteTroop',{id:id});})); }
-function remoteArchiveTroop(id,archived,archivedDate){ saveData(); return _trackWrite(apiFetch('/troops/'+id+'/archive',{method:'PATCH',body:JSON.stringify({archived:archived,archivedDate:archivedDate})}).catch(function(e){console.error(e); queueOp('archiveTroop',{id:id,archived:archived,archivedDate:archivedDate});})); }
-function remoteSavePatrol(p){ saveData(); var body={id:p.id,ptl_id:p.ptlId,ptl_seq:(p.ptlSeq!=null?p.ptlSeq:null),date:p.date,type:p.type,troops:p.troops,area:p.area,duration:p.duration,route:p.route,remarks:p.remarks,commander:p.commander||null,commander_auto:p.commanderAuto===false?false:(p.commanderAuto===true?true:null)}; return _trackWrite(apiFetch('/patrols',{method:'POST',body:JSON.stringify(body)}).catch(function(e){console.error(e); queueOp('savePatrol',body);})); }
+// Shared decision point for EVERY write failure, first attempt included —
+// not just retries inside flushOutbox. Previously a save's very first
+// failure always went straight to queueOp() no matter what kind of error
+// it was, so an IMMEDIATE genuine rejection (bad data, not "offline")
+// still sat in the outbox looking like a normal pending item until some
+// LATER background sync discovered the rejection and silently dropped it
+// with no warning. Routing it through the same 401-vs-4xx check right
+// here means a genuine rejection is flagged for review immediately,
+// the moment it happens, instead of being invisible until a future sync.
+function handleWriteFailure(kind,payload,e){
+  console.error(kind+' failed',e);
+  if(e && e.status && e.status!==401 && e.status>=400 && e.status<500){
+    addFailed(kind,payload,(e&&e.data&&e.data.error)||e.message||('Server rejected with status '+e.status));
+  } else {
+    queueOp(kind,payload);
+  }
+}
+function remoteSaveTroop(t){ saveData(); return _trackWrite(apiFetch('/troops',{method:'POST',body:JSON.stringify(t)}).catch(function(e){handleWriteFailure('saveTroop',t,e);})); }
+function remoteDeleteTroop(id){ saveData(); return _trackWrite(apiFetch('/troops/'+id,{method:'DELETE'}).catch(function(e){handleWriteFailure('deleteTroop',{id:id},e);})); }
+function remoteArchiveTroop(id,archived,archivedDate){ saveData(); return _trackWrite(apiFetch('/troops/'+id+'/archive',{method:'PATCH',body:JSON.stringify({archived:archived,archivedDate:archivedDate})}).catch(function(e){handleWriteFailure('archiveTroop',{id:id,archived:archived,archivedDate:archivedDate},e);})); }
+function remoteSavePatrol(p){ saveData(); var body={id:p.id,ptl_id:p.ptlId,ptl_seq:(p.ptlSeq!=null?p.ptlSeq:null),date:p.date,type:p.type,troops:p.troops,area:p.area,duration:p.duration,route:p.route,remarks:p.remarks,commander:p.commander||null,commander_auto:p.commanderAuto===false?false:(p.commanderAuto===true?true:null)}; return _trackWrite(apiFetch('/patrols',{method:'POST',body:JSON.stringify(body)}).catch(function(e){handleWriteFailure('savePatrol',body,e);})); }
 // POB Commander is now a Role (set in Add/Edit Troop), not a Rank — this
 // quietly removes it from anyone's saved Rank list if it's still there
 // from before, so it doesn't show up twice in two different fields.
@@ -3619,17 +3758,17 @@ function migrateCommanders(){
     changed.forEach(function(p){ remoteSavePatrol(p); });
   }
 }
-function remoteDeletePatrol(id){ saveData(); return _trackWrite(apiFetch('/patrols/'+id,{method:'DELETE'}).catch(function(e){console.error(e); queueOp('deletePatrol',{id:id});})); }
+function remoteDeletePatrol(id){ saveData(); return _trackWrite(apiFetch('/patrols/'+id,{method:'DELETE'}).catch(function(e){handleWriteFailure('deletePatrol',{id:id},e);})); }
 // Duties now save one record at a time to their own endpoint instead of
 // riding along inside remoteSaveConfig's whole-array 'duties' blob — see
 // the comment on remoteSaveConfig below for why that was silently
 // erasing duties logged from other devices. Same shape as
 // remoteSaveTroop/remoteSavePatrol: write local first, push to the
 // server, and queue it for retry if that fails/is offline.
-function remoteSaveDuty(d){ saveData(); var body={id:d.id,dutySeq:d.dutySeq,date:d.date,logicalDate:d.logicalDate,type:d.type,postId:d.postId,postName:d.postName,startTime:d.startTime,durationHours:d.durationHours,troops:d.troops,remarks:d.remarks,adminOverride:d.adminOverride,replacements:d.replacements,createdAt:d.createdAt,modifiedAt:d.modifiedAt,cancelled:d.cancelled,cancelledAt:d.cancelledAt||null,shiftIdx:d.shiftIdx,shiftIdxCount:d.shiftIdxCount,dutyId:d.dutyId}; return _trackWrite(apiFetch('/duties',{method:'POST',body:JSON.stringify(body)}).catch(function(e){console.error('saveDuty failed',e); queueOp('saveDuty',body);})); }
+function remoteSaveDuty(d){ saveData(); var body={id:d.id,dutySeq:d.dutySeq,date:d.date,logicalDate:d.logicalDate,type:d.type,postId:d.postId,postName:d.postName,startTime:d.startTime,durationHours:d.durationHours,troops:d.troops,remarks:d.remarks,adminOverride:d.adminOverride,replacements:d.replacements,createdAt:d.createdAt,modifiedAt:d.modifiedAt,cancelled:d.cancelled,cancelledAt:d.cancelledAt||null,shiftIdx:d.shiftIdx,shiftIdxCount:d.shiftIdxCount,dutyId:d.dutyId}; return _trackWrite(apiFetch('/duties',{method:'POST',body:JSON.stringify(body)}).catch(function(e){handleWriteFailure('saveDuty',body,e);})); }
 function remoteSaveDuties(list){ return Promise.all((list||[]).map(function(d){ return remoteSaveDuty(d); })); }
-function remoteDeleteDuty(id){ saveData(); return _trackWrite(apiFetch('/duties/'+id,{method:'DELETE'}).catch(function(e){console.error(e); queueOp('deleteDuty',{id:id});})); }
-function remoteSaveAudit(entry){ return _trackWrite(apiFetch('/audit',{method:'POST',body:JSON.stringify(entry)}).catch(function(e){console.error(e); queueOp('saveAudit',entry);})); }
+function remoteDeleteDuty(id){ saveData(); return _trackWrite(apiFetch('/duties/'+id,{method:'DELETE'}).catch(function(e){handleWriteFailure('deleteDuty',{id:id},e);})); }
+function remoteSaveAudit(entry){ return _trackWrite(apiFetch('/audit',{method:'POST',body:JSON.stringify(entry)}).catch(function(e){handleWriteFailure('saveAudit',entry,e);})); }
 // remoteSaveConfig used to fire all 9 key/value writes to /config in parallel.
 // If the server stores config as one document and does read-modify-write per
 // request, concurrent requests can race: one reads the doc before another's
@@ -3656,7 +3795,7 @@ function remoteSaveConfig(){
   var runP = _configSaveChain.then(function(){
     return jobs.reduce(function(chain,j){
       return chain.then(function(){
-        return apiFetch('/config',{method:'POST',body:JSON.stringify(j)}).catch(function(e){console.error(e); queueOp('saveConfig',j);});
+        return apiFetch('/config',{method:'POST',body:JSON.stringify(j)}).catch(function(e){handleWriteFailure('saveConfig',j,e);});
       });
     }, Promise.resolve());
   });
@@ -10891,6 +11030,7 @@ function requestPersistentStorage(){
       document.getElementById('print-date-line').textContent='Generated: '+nowStr();
       startCountdown();
       updatePendingBadge();
+      updateFailedBadge();
       updateDraftsBadge();
       updateDutyDraftsBadge();
     }catch(e){console.error('Init error:',e);}
