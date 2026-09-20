@@ -3436,11 +3436,32 @@ function flushOutbox(){
 // identical to a successful one on screen, while nothing was actually
 // written to the database. This version properly rejects on any non-2xx
 // status so the existing retry/offline-queue logic actually engages.
+//
+// TIMEOUT FIX: on an unreliable link (satellite/cellular with dropouts),
+// a request can be sent and then just never get a response — no error,
+// no rejection, the fetch() promise simply never settles. Every piece of
+// this app's offline-safety net (queueOp/outbox, _pendingWrites, the
+// sync-state dot) only engages once a request REJECTS. A hung request
+// never does, so it silently bypassed the outbox entirely: it looked
+// "pending" only in memory for that page session, and the moment the
+// app restarted (tab reload, Android backgrounding/killing it — routine
+// overnight at a post with patchy signal) that in-memory protection was
+// gone with no record it had ever existed. The next sync then pulled the
+// server's copy — which never actually received that write — straight
+// over local state, erasing it. (This is the same failure class as the
+// 401-outbox bug fixed above, just triggered by a stalled connection
+// instead of a stale session.) A hard timeout here forces a stuck
+// request to actually REJECT, so it flows into the existing retry/outbox
+// logic instead of disappearing without a trace.
 function apiFetch(path, opts) {
   opts = opts || {};
   var headers = Object.assign({'Content-Type':'application/json','x-session-token':getSessionToken()}, opts.headers||{});
-  return fetch(API_URL + path, Object.assign({}, opts, {headers:headers}))
+  var controller=(typeof AbortController!=='undefined')?new AbortController():null;
+  var timedOut=false;
+  var timer=controller?setTimeout(function(){ timedOut=true; controller.abort(); }, 20000):null;
+  return fetch(API_URL + path, Object.assign({}, opts, {headers:headers}, controller?{signal:controller.signal}:{}))
     .then(function(r){
+      if(timer) clearTimeout(timer);
       return r.json().catch(function(){ return {}; }).then(function(data){
         if(!r.ok){
           var err=new Error((data&&data.error)||('Request failed with status '+r.status));
@@ -3471,6 +3492,11 @@ function apiFetch(path, opts) {
         }
         return data;
       });
+    })
+    .catch(function(e){
+      if(timer) clearTimeout(timer);
+      if(timedOut){ var te=new Error('Request timed out — connection may be down.'); te.isTimeout=true; throw te; }
+      throw e;
     });
 }
 function dbToTroop(r) {
