@@ -2696,10 +2696,6 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
       <label class="cb-wrap" style="font-size:13px;"><input type="checkbox" id="t-senior-sgt"><span class="cb-box"></span>Eligible for Roaming duty</label>
       <label class="cb-wrap" style="font-size:13px;"><input type="checkbox" id="t-dual-admin"><span class="cb-box"></span>Also Administration/HQ (dual-role) — keeps their Role/trade above (e.g. Driver) for patrol eligibility, but applies the Administration target % and Sentry cap to them too</label>
     </div>
-    <div class="fg" id="t-duty-quals-wrap">
-      <label class="field-label">🛡 Duty Qualifications</label>
-      <div id="t-duty-quals-boxes" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding-top:6px;font-size:13px;"></div>
-    </div>
     <div class="fg" id="t-absence-wrap">
       <label class="field-label">🏥 Leave / Sick / Absence Record <span style="font-weight:400;color:var(--text-muted);">(excluded from participation %)</span></label>
       <div id="t-absence-list" style="margin-bottom:8px;"></div>
@@ -8362,7 +8358,17 @@ function isRoamingEligible(t){
 function isRoamingOfficerRank(t){ if(!t) return false; var r=(t.rank||'').toLowerCase(); return r.indexOf('major')>=0||r.indexOf('capt')>=0; }
 function isRoamingJCORank(t){ if(!t) return false; var r=(t.rank||'').toLowerCase(); return r==='wo1'||r==='wo2'||r==='wo'||r==='csm'; }
 function isRoamingEligibleSergeant(t){ return !!(t&&(t.rank||'').toLowerCase()==='sergeant'&&t.isSeniorSergeant); }
-function isDutyQualified(t,qualTag){ if(!qualTag) return true; return t&&(t.dutyQuals||[]).indexOf(qualTag)>=0; }
+// A troop's Role also counts as a qualification of the same name (Role = MMG is MMG-qualified),
+// so Signal/Medical/MMG/HMG never need a separate tick. Explicit tags still work for anything else.
+function roleQualNames(){
+  return ['General','Medical','Signal','HMG','MMG','Driver','Mechanic','Administration','POB Commander'].concat(D.config.customRoles||[]);
+}
+function isRoleQualName(q){ var l=String(q).toLowerCase(); return roleQualNames().some(function(r){return String(r).toLowerCase()===l;}); }
+function isDutyQualified(t,qualTag){
+  if(!qualTag) return true; if(!t) return false;
+  if((t.dutyQuals||[]).indexOf(qualTag)>=0) return true;
+  return String(t.trade||'').toLowerCase()===String(qualTag).toLowerCase();
+}
 function lastPostAssignment(tid,postId){
   if(!postId) return null;
   var ds=D.duties.filter(function(d){return !d.cancelled&&d.postId===postId&&(d.troops||[]).indexOf(tid)>=0;});
@@ -10107,8 +10113,9 @@ function saveTroop(){
   var restrictedRange=document.getElementById('t-restricted-range').checked;
   var isSeniorSergeant=document.getElementById('t-senior-sgt').checked;
   var dualAdmin=document.getElementById('t-dual-admin').checked;
-  var dutyQuals=Array.prototype.slice.call(document.querySelectorAll('#t-duty-quals-boxes input[type=checkbox]:checked')).map(function(el){return el.value;});
+  var dutyQuals=[]; // Duty Qualifications box removed from the form — Role now supplies these; any tags already saved on a troop are kept below
   var editId=document.getElementById('t-edit-id').value;
+  if(editId){ var _old=D.troops.find(function(x){return x.id===editId;}); if(_old) (_old.dutyQuals||[]).forEach(function(q){ if(dutyQuals.indexOf(q)<0) dutyQuals.push(q); }); }
   if(!name){showAlert('t-alert','Please enter a name.','danger');return;}
   if(!deploymentDate){showAlert('t-alert','Please enter a valid Deployment Date (DD/MM/YYYY).','danger');return;}
   if(editId){
@@ -10216,9 +10223,12 @@ function cancelEdit(){ document.getElementById('t-edit-id').value=''; populateTr
 function renderTroopDutyQualBoxes(checkedList){
   var el=document.getElementById('t-duty-quals-boxes');
   if(!el) return;
-  var quals=D.config.dutyQuals||[];
-  if(quals.length===0){ el.innerHTML='<span style="color:var(--text-muted);font-size:12px;">No qualifications defined yet — add some in Settings.</span>'; return; }
-  el.innerHTML=quals.map(function(q){ return '<label class="cb-wrap"><input type="checkbox" value="'+escHtml(q)+'"'+(checkedList.indexOf(q)>=0?' checked':'')+'><span class="cb-box"></span>'+escHtml(q)+'</label>'; }).join('');
+  var allQuals=D.config.dutyQuals||[];
+  var quals=allQuals.filter(function(q){return !isRoleQualName(q);});
+  var hidden=allQuals.filter(function(q){return isRoleQualName(q);});
+  var note=hidden.length?'<div style="width:100%;font-size:11.5px;color:var(--text-muted);">'+escHtml(hidden.join(', '))+' — taken automatically from Role above.</div>':'';
+  if(quals.length===0){ el.innerHTML=hidden.length?note:'<span style="color:var(--text-muted);font-size:12px;">No qualifications defined yet — add some in Settings.</span>'; return; }
+  el.innerHTML=note+quals.map(function(q){ return '<label class="cb-wrap"><input type="checkbox" value="'+escHtml(q)+'"'+(checkedList.indexOf(q)>=0?' checked':'')+'><span class="cb-box"></span>'+escHtml(q)+'</label>'; }).join('');
 }
 // ── LEAVE / SICK / ABSENCE RECORD (item 6) ─────────────────────────────
 // Lets an admin log a period of time off directly on the profile — past
