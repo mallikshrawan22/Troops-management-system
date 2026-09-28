@@ -2322,14 +2322,14 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
         <div class="fg"><label class="field-label">HMG Needed</label>
           <div style="display:flex;align-items:center;gap:6px;">
             <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-hmg-count',-1)">−</button>
-            <input type="number" id="stm-hmg-count" min="0" value="0" style="text-align:center;" oninput="stmUpdateTotal()">
+            <input type="number" id="stm-hmg-count" min="0" value="1" style="text-align:center;" oninput="stmUpdateTotal()">
             <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-hmg-count',1)">+</button>
           </div>
         </div>
         <div class="fg"><label class="field-label">MMG Needed</label>
           <div style="display:flex;align-items:center;gap:6px;">
             <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-mmg-count',-1)">−</button>
-            <input type="number" id="stm-mmg-count" min="0" value="0" style="text-align:center;" oninput="stmUpdateTotal()">
+            <input type="number" id="stm-mmg-count" min="0" value="1" style="text-align:center;" oninput="stmUpdateTotal()">
             <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-mmg-count',1)">+</button>
           </div>
         </div>
@@ -4333,8 +4333,8 @@ function stmLoadConfig(){
     document.getElementById('stm-others').value=cfg.others!=null?cfg.others:15;
     document.getElementById('stm-medical-count').value=cfg.medical!=null?cfg.medical:1;
     document.getElementById('stm-signal-count').value=cfg.signal!=null?cfg.signal:1;
-    document.getElementById('stm-hmg-count').value=cfg.hmg!=null?cfg.hmg:0;
-    document.getElementById('stm-mmg-count').value=cfg.mmg!=null?cfg.mmg:0;
+    document.getElementById('stm-hmg-count').value=cfg.hmg!=null?cfg.hmg:1;
+    document.getElementById('stm-mmg-count').value=cfg.mmg!=null?cfg.mmg:1;
     document.getElementById('stm-mechanic-need').checked=!!cfg.mechanic;
     // Note: long-distance is intentionally NOT restored — it resets fresh
     // each time so a restricted-range exclusion never silently carries
@@ -4350,8 +4350,8 @@ function stmResetDefaults(){
   document.getElementById('stm-others').value=15;
   document.getElementById('stm-medical-count').value=1;
   document.getElementById('stm-signal-count').value=1;
-  document.getElementById('stm-hmg-count').value=0;
-  document.getElementById('stm-mmg-count').value=0;
+  document.getElementById('stm-hmg-count').value=1;
+  document.getElementById('stm-mmg-count').value=1;
   document.getElementById('stm-mechanic-need').checked=false;
   document.getElementById('stm-long-distance').checked=false;
   document.getElementById('stm-apc').value=0;
@@ -5038,13 +5038,22 @@ var PRINT_ROLE_CSS='.rb{display:inline-block;padding:2px 7px;font-size:12px;font
   '.rb-med{background:#fff;color:#c62828;border:2px solid #c62828;}'+
   '.rb-sig{background:#fff;color:#000;border:2px dashed #000;}'+
   '.rb-drv{background:#d9d9d9;color:#000;border:1px solid #555;}'+
+  '.rb-trn{background:#fff;color:#444;border:1px dotted #666;font-size:10.5px;font-weight:800;padding:1px 5px;}'+
   '.rb-cmd{background:#fff3c4;color:#000;border:3px double #000;}'+
   '.rb-stack{display:flex;flex-direction:column;gap:3px;align-items:flex-start;}'+
   '.rb-key{margin-top:12px;font-size:11px;color:#444;font-weight:700;display:flex;gap:14px;flex-wrap:wrap;align-items:center;}';
 var PRINT_ROLE_RX=/\((?:[^)]*?\b)?(MMG|HMG|MDICAL|MEDICAL|SGNAL|SIGNAL|LIGHT|HEAVY|APC)\b[^)]*\)/i;
 // Returns {key, grade} for MMG/HMG/MED/SIG/DRV, or null. Uses the troop's Role field first,
 // then falls back to a "(MMG)"-style tag typed into the Unit text.
-function printRoleInfo(t){
+// gm (optional) = {g:'MMG'|'HMG'|''}: when given (draft came from a Suggest Team run), MMG/HMG is
+// marked ONLY for the troop the rotation assigned to carry that gun, never for merely gun-trained troops.
+function printRoleInfo(t,gm){
+  if(gm&&gm.g) return {key:gm.g};
+  var r=printRoleInfoRaw(t);
+  if(gm&&r&&(r.key==='MMG'||r.key==='HMG')) return {key:r.key,trained:true}; // gun-trained but not the one carrying it
+  return r;
+}
+function printRoleInfoRaw(t){
   var tr=t.trade||'', unit=t.unit||'', m=PRINT_ROLE_RX.exec(unit), tag=m?m[1].toUpperCase():'';
   var grade=(t.driverQuals||'').split(',').filter(Boolean).map(function(q){return q.toUpperCase();}).join('/');
   if(tr==='HMG') return {key:'HMG'};
@@ -5060,6 +5069,8 @@ function printRoleInfo(t){
 }
 function printRoleBadge(info){
   if(!info) return '';
+  if(info.key==='TRN') return '<span class="rb rb-trn">MMG/HMG TRAINED &middot; NOT ON GUN</span>';
+  if(info.trained) return '<span class="rb rb-trn">'+info.key+' TRAINED</span>';
   var lbl={CMD:'&#9733; PATROL CDR',HMG:'HMG',MMG:'MMG',MED:'&#10010; MEDICAL',SIG:'SIGNAL',DRV:'DRIVER'+(info.grade?' &middot; '+info.grade:'')};
   return '<span class="rb rb-'+info.key.toLowerCase()+'">'+lbl[info.key]+'</span>';
 }
@@ -5072,9 +5083,11 @@ function printPatrolDraft(id){
   if(!d) return;
   var s=D.settings;
   var troops=sortTroops((d.troops||[]).map(troopById).filter(Boolean));
+  var slotMode=(d.slots||[]).some(function(sl){return sl&&!sl.cmd;}); var gunOf={};
+  (d.slots||[]).forEach(function(sl){ var g=gunOfSlot(sl); if(g&&sl.chosenId) gunOf[sl.chosenId]=g; });
   var _present={}; var _cmdId=draftCmdId(d)||pickSeniorTroopId(troops.map(function(x){return x.id;}));
-  var rows=troops.map(function(t,i){ var ri=printRoleInfo(t); if(ri) _present[ri.key]=ri; var isCmd=(t.id===_cmdId); if(isCmd) _present.CMD={key:'CMD'}; var unitTxt=ri?printUnitClean(t):(t.unit||''); var badges=(isCmd&&ri)?'<div class=\"rb-stack\">'+printRoleBadge({key:'CMD'})+printRoleBadge(ri)+'</div>':(isCmd?printRoleBadge({key:'CMD'}):printRoleBadge(ri)); return '<tr><td>'+(i+1)+'</td><td>'+(t.sn||'')+'</td><td>'+t.rank.toUpperCase()+'</td><td>'+t.name.toUpperCase()+'</td><td>'+badges+'</td><td>'+escHtml(unitTxt)+'</td></tr>'; }).join('');
-  var keyOrder=['CMD','HMG','MMG','MED','SIG','DRV'];
+  var rows=troops.map(function(t,i){ var ri=printRoleInfo(t,slotMode?{g:gunOf[t.id]||''}:null); if(ri) _present[ri.trained?'TRN':ri.key]=ri; var isCmd=(t.id===_cmdId); if(isCmd) _present.CMD={key:'CMD'}; var unitTxt=(ri||slotMode)?printUnitClean(t):(t.unit||''); var badges=(isCmd&&ri)?'<div class=\"rb-stack\">'+printRoleBadge({key:'CMD'})+printRoleBadge(ri)+'</div>':(isCmd?printRoleBadge({key:'CMD'}):printRoleBadge(ri)); return '<tr><td>'+(i+1)+'</td><td>'+(t.sn||'')+'</td><td>'+t.rank.toUpperCase()+'</td><td>'+t.name.toUpperCase()+'</td><td>'+badges+'</td><td>'+escHtml(unitTxt)+'</td></tr>'; }).join('');
+  var keyOrder=['CMD','HMG','MMG','TRN','MED','SIG','DRV'];
   var legend=keyOrder.filter(function(k){return _present[k];}).length?('<div class=\"rb-key\"><span>ROLE KEY:</span>'+keyOrder.filter(function(k){return _present[k];}).map(function(k){return printRoleBadge({key:k});}).join('')+'</div>'):'';
   var win=window.open('','_blank','width=900,height=700');
   win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Patrol Draft</title><style>body{font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;background:#fff;color:#000;margin:0;padding:20px;font-size:16px;letter-spacing:0.3px;}.hdr{text-align:center;border-bottom:2px solid #2d5a3d;padding-bottom:12px;margin-bottom:20px;}.hdr h2{margin:0 0 4px;font-size:18px;color:#1a3a2a;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:900;letter-spacing:-0.3px;}.hdr p{margin:2px 0;font-size:13px;font-weight:700;color:#555;}table{width:100%;border-collapse:collapse;font-size:14.5px;}th{background:#2d5a3d;color:#fff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:800;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;padding:8px 10px;text-align:left;}td{padding:7px 10px;border-bottom:1px solid #b8c4b8;font-weight:800;color:#000;}tr:nth-child(even) td{background:#f8f8f8;}tr{page-break-inside:avoid;}.footer{margin-top:16px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px;}@media print{@page{margin:1.5cm;size:A4;}button{display:none!important;}thead{display:table-header-group;}}'+PRINT_ROLE_CSS+'</style></head><body>'+
@@ -5145,8 +5158,8 @@ function saveDraftEdits(){
   var d=D.drafts.find(function(x){return x.id===draftEditingId;});
   if(!d){ document.getElementById('draft-edit-modal').classList.remove('open'); return; }
   d.troops=draftEditTroops.slice();
-  var _keepCmd=draftCmdId(d);
-  d.slots=(_keepCmd&&draftEditTroops.indexOf(_keepCmd)>=0)?[{role:'Patrol Commander',chosenId:_keepCmd,cmd:true}]:null; // composition may no longer match the original suggested roles; keep only a still-valid chosen commander
+  var _keptSlots=(d.slots||[]).filter(function(sl){return sl&&sl.chosenId&&draftEditTroops.indexOf(sl.chosenId)>=0;}); // keep role/gun/commander info for troops still in the draft
+  d.slots=_keptSlots.length?_keptSlots:null;
   d.plannedDate=parseDate(document.getElementById('draft-planned-date').value)||null;
   d.editedAt=new Date().toISOString();
   remoteSavePatrolDraft(d);
