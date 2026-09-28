@@ -4982,6 +4982,23 @@ function updateDraftsBadge(){
 }
 function openDraftsModal(){ renderDraftsList(); document.getElementById('drafts-modal').classList.add('open'); }
 function closeDraftsModal(){ document.getElementById('drafts-modal').classList.remove('open'); }
+// Patrol Commander chosen on a draft. Stored as a marker entry inside d.slots
+// ({cmd:true}) so it rides the existing slots field and syncs with no schema change.
+// No marker (or troop no longer in the draft) = auto: the senior-most troop.
+function draftCmdId(d){
+  var m=(d&&d.slots||[]).filter(function(sl){return sl&&sl.cmd&&sl.chosenId&&(d.troops||[]).indexOf(sl.chosenId)>=0;})[0];
+  return m?m.chosenId:null;
+}
+function setDraftCommander(id,tid){
+  var d=D.drafts.find(function(x){return x.id===id;});
+  if(!d) return;
+  var rest=(d.slots||[]).filter(function(sl){return !(sl&&sl.cmd);});
+  if(tid) rest.push({role:'Patrol Commander',chosenId:tid,cmd:true});
+  d.slots=rest.length?rest:null;
+  remoteSavePatrolDraft(d);
+  audit('Patrol draft commander '+(tid?'set':'reset to auto'));
+  renderDraftsList();
+}
 function renderDraftsList(){
   var el=document.getElementById('drafts-list');
   if(!D.drafts||D.drafts.length===0){
@@ -4992,6 +5009,9 @@ function renderDraftsList(){
     var troops=(d.troops||[]).map(troopById).filter(Boolean);
     var missing=(d.troops||[]).length-troops.length;
     var names=sortTroops(troops).slice(0,3).map(function(t){return t.rank.toUpperCase()+' '+t.name.toUpperCase();}).join(', ');
+    var _cid=draftCmdId(d)||pickSeniorTroopId(d.troops||[]), _cman=!!draftCmdId(d);
+    var cmdOpts='<option value="">Auto (senior-most)</option>'+sortTroops(troops).map(function(t){return '<option value="'+t.id+'"'+(t.id===draftCmdId(d)?' selected':'')+'>'+t.rank.toUpperCase()+' '+escHtml(t.name.toUpperCase())+'</option>';}).join('');
+    var cmdLine='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;"><span style="font-weight:700;white-space:nowrap;">&#9733; Patrol Cdr</span><select onchange="setDraftCommander(\''+d.id+'\',this.value)" style="flex:1;min-width:0;">'+cmdOpts+'</select></div>';
     var more=troops.length>3?(' +'+(troops.length-3)+' more'):'';
     var when=fmtDateLong(d.createdAt.slice(0,10))+' · '+new Date(d.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
     var plannedLine=d.plannedDate?
@@ -5001,7 +5021,7 @@ function renderDraftsList(){
       '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">'+when+' · '+(d.troops||[]).length+' troops'+'</div>'+
       plannedLine+
       '<div style="font-size:14px;margin:5px 0 8px;">'+(names?escHtml(names)+escHtml(more):'<span style="color:var(--text-muted);">No troops</span>')+'</div>'+
-      (missing>0?'<div style="font-size:12px;color:var(--red-light);margin-bottom:8px;">⚠ '+missing+' troop(s) in this draft no longer exist in the roster.</div>':'')+
+      cmdLine+(missing>0?'<div style="font-size:12px;color:var(--red-light);margin-bottom:8px;">⚠ '+missing+' troop(s) in this draft no longer exist in the roster.</div>':'')+
       '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
       '<button class="btn btn-ghost btn-sm" onclick="editDraft(\''+d.id+'\')">✏️ Edit</button>'+
       '<button class="btn btn-primary btn-sm" onclick="logDraftAsPatrol(\''+d.id+'\')">⚡ Log Patrol</button>'+
@@ -5010,16 +5030,56 @@ function renderDraftsList(){
       '</div></div>';
   }).join('');
 }
+// ---- Print role badges (Patrol Draft print) -------------------------------
+// Distinct in colour AND in border/fill style so they still read on a B&W photocopy.
+var PRINT_ROLE_CSS='.rb{display:inline-block;padding:2px 7px;font-size:12px;font-weight:900;letter-spacing:0.6px;border-radius:3px;white-space:nowrap;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'+
+  '.rb-hmg{background:#000;color:#fff;border:2px solid #000;}'+
+  '.rb-mmg{background:#fff;color:#000;border:3px solid #000;}'+
+  '.rb-med{background:#fff;color:#c62828;border:2px solid #c62828;}'+
+  '.rb-sig{background:#fff;color:#000;border:2px dashed #000;}'+
+  '.rb-drv{background:#d9d9d9;color:#000;border:1px solid #555;}'+
+  '.rb-cmd{background:#fff3c4;color:#000;border:3px double #000;}'+
+  '.rb-stack{display:flex;flex-direction:column;gap:3px;align-items:flex-start;}'+
+  '.rb-key{margin-top:12px;font-size:11px;color:#444;font-weight:700;display:flex;gap:14px;flex-wrap:wrap;align-items:center;}';
+var PRINT_ROLE_RX=/\((?:[^)]*?\b)?(MMG|HMG|MDICAL|MEDICAL|SGNAL|SIGNAL|LIGHT|HEAVY|APC)\b[^)]*\)/i;
+// Returns {key, grade} for MMG/HMG/MED/SIG/DRV, or null. Uses the troop's Role field first,
+// then falls back to a "(MMG)"-style tag typed into the Unit text.
+function printRoleInfo(t){
+  var tr=t.trade||'', unit=t.unit||'', m=PRINT_ROLE_RX.exec(unit), tag=m?m[1].toUpperCase():'';
+  var grade=(t.driverQuals||'').split(',').filter(Boolean).map(function(q){return q.toUpperCase();}).join('/');
+  if(tr==='HMG') return {key:'HMG'};
+  if(tr==='MMG') return {key:'MMG'};
+  if(tr==='Medical') return {key:'MED'};
+  if(tr==='Signal') return {key:'SIG'};
+  if(tr==='Driver') return {key:'DRV',grade:grade||((tag==='LIGHT'||tag==='HEAVY'||tag==='APC')?tag:'')};
+  if(tag==='HMG'||tag==='MMG') return {key:tag};
+  if(tag==='MDICAL'||tag==='MEDICAL') return {key:'MED'};
+  if(tag==='SGNAL'||tag==='SIGNAL') return {key:'SIG'};
+  if(tag==='LIGHT'||tag==='HEAVY'||tag==='APC') return {key:'DRV',grade:tag};
+  return null;
+}
+function printRoleBadge(info){
+  if(!info) return '';
+  var lbl={CMD:'&#9733; PATROL CDR',HMG:'HMG',MMG:'MMG',MED:'&#10010; MEDICAL',SIG:'SIGNAL',DRV:'DRIVER'+(info.grade?' &middot; '+info.grade:'')};
+  return '<span class="rb rb-'+info.key.toLowerCase()+'">'+lbl[info.key]+'</span>';
+}
+// Unit text without the role tag that now has its own column.
+function printUnitClean(t){
+  return (t.unit||'').replace(PRINT_ROLE_RX,'').replace(/\s{2,}/g,' ').trim();
+}
 function printPatrolDraft(id){
   var d=D.drafts.find(function(x){return x.id===id;});
   if(!d) return;
   var s=D.settings;
   var troops=sortTroops((d.troops||[]).map(troopById).filter(Boolean));
-  var rows=troops.map(function(t,i){ return '<tr><td>'+(i+1)+'</td><td>'+(t.sn||'')+'</td><td>'+t.rank.toUpperCase()+'</td><td>'+t.name.toUpperCase()+'</td><td>'+(t.unit||'')+'</td></tr>'; }).join('');
+  var _present={}; var _cmdId=draftCmdId(d)||pickSeniorTroopId(troops.map(function(x){return x.id;}));
+  var rows=troops.map(function(t,i){ var ri=printRoleInfo(t); if(ri) _present[ri.key]=ri; var isCmd=(t.id===_cmdId); if(isCmd) _present.CMD={key:'CMD'}; var unitTxt=ri?printUnitClean(t):(t.unit||''); var badges=(isCmd&&ri)?'<div class=\"rb-stack\">'+printRoleBadge({key:'CMD'})+printRoleBadge(ri)+'</div>':(isCmd?printRoleBadge({key:'CMD'}):printRoleBadge(ri)); return '<tr><td>'+(i+1)+'</td><td>'+(t.sn||'')+'</td><td>'+t.rank.toUpperCase()+'</td><td>'+t.name.toUpperCase()+'</td><td>'+badges+'</td><td>'+escHtml(unitTxt)+'</td></tr>'; }).join('');
+  var keyOrder=['CMD','HMG','MMG','MED','SIG','DRV'];
+  var legend=keyOrder.filter(function(k){return _present[k];}).length?('<div class=\"rb-key\"><span>ROLE KEY:</span>'+keyOrder.filter(function(k){return _present[k];}).map(function(k){return printRoleBadge({key:k});}).join('')+'</div>'):'';
   var win=window.open('','_blank','width=900,height=700');
-  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Patrol Draft</title><style>body{font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;background:#fff;color:#000;margin:0;padding:20px;font-size:16px;letter-spacing:0.3px;}.hdr{text-align:center;border-bottom:2px solid #2d5a3d;padding-bottom:12px;margin-bottom:20px;}.hdr h2{margin:0 0 4px;font-size:18px;color:#1a3a2a;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:900;letter-spacing:-0.3px;}.hdr p{margin:2px 0;font-size:13px;font-weight:700;color:#555;}table{width:100%;border-collapse:collapse;font-size:14.5px;}th{background:#2d5a3d;color:#fff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:800;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;padding:8px 10px;text-align:left;}td{padding:7px 10px;border-bottom:1px solid #b8c4b8;font-weight:800;color:#000;}tr:nth-child(even) td{background:#f8f8f8;}tr{page-break-inside:avoid;}.footer{margin-top:16px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px;}@media print{@page{margin:1.5cm;size:A4;}button{display:none!important;}thead{display:table-header-group;}}</style></head><body>'+
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Patrol Draft</title><style>body{font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;background:#fff;color:#000;margin:0;padding:20px;font-size:16px;letter-spacing:0.3px;}.hdr{text-align:center;border-bottom:2px solid #2d5a3d;padding-bottom:12px;margin-bottom:20px;}.hdr h2{margin:0 0 4px;font-size:18px;color:#1a3a2a;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:900;letter-spacing:-0.3px;}.hdr p{margin:2px 0;font-size:13px;font-weight:700;color:#555;}table{width:100%;border-collapse:collapse;font-size:14.5px;}th{background:#2d5a3d;color:#fff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:800;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;padding:8px 10px;text-align:left;}td{padding:7px 10px;border-bottom:1px solid #b8c4b8;font-weight:800;color:#000;}tr:nth-child(even) td{background:#f8f8f8;}tr{page-break-inside:avoid;}.footer{margin-top:16px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px;}@media print{@page{margin:1.5cm;size:A4;}button{display:none!important;}thead{display:table-header-group;}}'+PRINT_ROLE_CSS+'</style></head><body>'+
     '<div class="hdr"><div style="font-size:12px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">'+(s.classification||'')+(s.classification?' — ':'')+(s.pob||'')+'</div><h2>PATROL DRAFT — '+(d.type?escHtml(d.type).toUpperCase():'PROPOSED TEAM')+'</h2><p style="font-size:15px;font-weight:900;color:#1a3a2a;">'+(d.plannedDate?('Planned for '+fmtDateLong(d.plannedDate)):'No planned date set')+'</p><p>Generated: '+nowStr()+(s.commander?' · Commanding: '+s.commander:'')+'</p></div>'+
-    '<table><thead><tr><th>S.No</th><th>Personal No.</th><th>Rank</th><th>Name</th><th>Unit</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<table><thead><tr><th>S.No</th><th>Personal No.</th><th>Rank</th><th>Name</th><th>Role</th><th>Unit</th></tr></thead><tbody>'+rows+'</tbody></table>'+legend+
     '<div class="footer">'+(s.pob||'')+' Troops Management System · Patrol Draft · '+nowStr()+'</div>'+
     '<div style="margin-top:16px;text-align:center;"><button onclick="window.print()" style="padding:10px 24px;background:#2d5a3d;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer;font-weight:700;">🖨 Print</button></div></body></html>');
   win.document.close(); win.focus();
@@ -5085,7 +5145,8 @@ function saveDraftEdits(){
   var d=D.drafts.find(function(x){return x.id===draftEditingId;});
   if(!d){ document.getElementById('draft-edit-modal').classList.remove('open'); return; }
   d.troops=draftEditTroops.slice();
-  d.slots=null; // composition may no longer match the original suggested roles
+  var _keepCmd=draftCmdId(d);
+  d.slots=(_keepCmd&&draftEditTroops.indexOf(_keepCmd)>=0)?[{role:'Patrol Commander',chosenId:_keepCmd,cmd:true}]:null; // composition may no longer match the original suggested roles; keep only a still-valid chosen commander
   d.plannedDate=parseDate(document.getElementById('draft-planned-date').value)||null;
   d.editedAt=new Date().toISOString();
   remoteSavePatrolDraft(d);
@@ -5103,6 +5164,7 @@ function logDraftAsPatrol(id){
   selectedTroops=ids.slice();
   selectedCommander=null;
   commanderManuallyChanged=false;
+  var _dc=draftCmdId(d); if(_dc&&ids.indexOf(_dc)>=0){ selectedCommander=_dc; commanderManuallyChanged=true; }
   pendingDraftLogId=id;
   _stmGunPending={};
   (d.slots||[]).forEach(function(sl){ var g=gunOfSlot(sl); if(g&&sl.chosenId&&ids.indexOf(sl.chosenId)>=0) _stmGunPending[sl.chosenId]=g; });
