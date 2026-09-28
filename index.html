@@ -1663,6 +1663,11 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
     <button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px;" onclick="toggleAddPostForm()" id="add-post-toggle-btn">➕ Add New Post</button>
     <div id="add-post-form" style="display:none;border-top:1px solid var(--border);margin-top:10px;padding-top:10px;">
       <div class="fg"><input type="text" id="new-post-name" placeholder="Post name (e.g. Main Gate)"></div>
+      <div class="fr">
+        <div class="fg"><label class="field-label">Gunner Required (every shift)</label>
+          <select id="new-post-gun"><option value="">None</option><option value="MMG">MMG</option><option value="HMG">HMG</option><option value="Any">MMG or HMG</option></select></div>
+        <div class="fg"><label class="field-label">Minimum Gunners</label><input type="number" id="new-post-gun-min" min="1" value="1"></div>
+      </div>
       <label class="cb-wrap" style="font-size:13px;margin-bottom:8px;"><input type="checkbox" id="new-post-continuous"><span class="cb-box"></span>Continuous — one troop covers day &amp; night (e.g. Signal, Medical)</label>
       <div class="fr">
         <div class="fg"><label class="field-label">Day Strength</label><input type="number" id="new-post-day" min="0" value="1"></div>
@@ -1901,7 +1906,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
     <details class="guide-item">
       <summary>Suggest Team — how the algorithm picks troops</summary>
       <div class="guide-body">
-        <p>Dashboard → <strong>Suggest Team</strong> builds a proposed patrol automatically. It fills specialist roles first (driver, JCO, medical, signal — whichever you tick), then fills the remaining "Others" seats by <strong>duty-%-rotation</strong>: whoever has the lowest share of patrol hours relative to their time deployed goes first, so participation stays balanced over time.</p>
+        <p>Dashboard → <strong>Suggest Team</strong> builds a proposed patrol automatically. It fills specialist roles first (driver, JCO, medical, signal, HMG, MMG — whichever you set), then fills the remaining "Others" seats by <strong>duty-%-rotation</strong>: whoever has the lowest share of patrol hours relative to their time deployed goes first, so participation stays balanced over time.</p>
         <p><strong>Female pairing rule:</strong> if any female troops are included, the app never assigns a single, uncompanioned female — they're only added in pairs (or as a pair alongside a female specialist), never as a lone seat. This is automatic and can't be turned off.</p>
         <p>Once generated, you can tap any troop to <strong>Replace</strong> them with the next-best alternative, or manually pick someone specific. You can also save the whole thing as a <strong>Draft</strong> to log later instead of committing immediately.</p>
       </div>
@@ -2313,6 +2318,23 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
         </div>
       </div>
 
+      <div class="fr">
+        <div class="fg"><label class="field-label">HMG Needed</label>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-hmg-count',-1)">−</button>
+            <input type="number" id="stm-hmg-count" min="0" value="0" style="text-align:center;" oninput="stmUpdateTotal()">
+            <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-hmg-count',1)">+</button>
+          </div>
+        </div>
+        <div class="fg"><label class="field-label">MMG Needed</label>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-mmg-count',-1)">−</button>
+            <input type="number" id="stm-mmg-count" min="0" value="0" style="text-align:center;" oninput="stmUpdateTotal()">
+            <button type="button" class="btn btn-ghost btn-sm" style="width:34px;padding:0;font-size:16px;font-weight:700;flex-shrink:0;" onclick="stmStep('stm-mmg-count',1)">+</button>
+          </div>
+        </div>
+      </div>
+
       <div class="stm-section-hdr" style="margin-top:20px;">Vehicle</div>
       <div class="fg"><label class="field-label">Vehicles for this Patrol</label>
         <div class="fr" style="gap:8px;">
@@ -2650,6 +2672,8 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
           <option value="General">General</option>
           <option value="Medical">Medical</option>
           <option value="Signal">Signal</option>
+          <option value="HMG">HMG</option>
+          <option value="MMG">MMG</option>
           <option value="Driver">Driver</option>
           <option value="Mechanic">Vehicle Mechanic</option>
           <option value="Administration">Administration</option>
@@ -3200,10 +3224,11 @@ function migrateDutySystem(){
   D.config.driverDutyQuota.sentryDay=D.config.driverDutyQuota.sentryDay||0;
   D.config.driverDutyQuota.sentryNight=D.config.driverDutyQuota.sentryNight||0;
   D.config.driverDutyQuota.roamingNight=D.config.driverDutyQuota.roamingNight||0;
+  if(!Array.isArray(D.config.gunLog)) D.config.gunLog=[];
   if(!D.config.dutyPosts) D.config.dutyPosts=[];
   D.config.dutyPosts=D.config.dutyPosts.map(function(p){
     if(typeof p==='string') return {id:uid('post'),name:p,active:true,dayStrength:1,nightStrength:1,genderPref:'none',qualRequired:'',continuous:false};
-    return {id:p.id||uid('post'),name:p.name||'Post',active:p.active!==false,dayStrength:(p.dayStrength!=null?p.dayStrength:1),nightStrength:(p.nightStrength!=null?p.nightStrength:1),genderPref:p.genderPref||'none',qualRequired:p.qualRequired||'',requiredRank:p.requiredRank||'',continuous:!!p.continuous,femaleDaySingleOk:!!p.femaleDaySingleOk};
+    return {id:p.id||uid('post'),name:p.name||'Post',active:p.active!==false,dayStrength:(p.dayStrength!=null?p.dayStrength:1),nightStrength:(p.nightStrength!=null?p.nightStrength:1),genderPref:p.genderPref||'none',qualRequired:p.qualRequired||'',requiredRank:p.requiredRank||'',continuous:!!p.continuous,femaleDaySingleOk:!!p.femaleDaySingleOk,gunRequired:(p.gunRequired==='MMG'||p.gunRequired==='HMG'||p.gunRequired==='Any')?p.gunRequired:'',gunMin:Math.max(1,parseInt(p.gunMin)||1)};
   });
   if(D.config.dutyPosts.length===0) D.config.dutyPosts=DEFAULT_DUTY_POSTS.map(function(p){return Object.assign({},p);});
   if(!D.config.dutyQuals) D.config.dutyQuals=DEFAULT_DUTY_QUALS.slice();
@@ -4271,6 +4296,8 @@ function stmSaveConfig(){
       others:document.getElementById('stm-others').value,
       medical:document.getElementById('stm-medical-count').value,
       signal:document.getElementById('stm-signal-count').value,
+      hmg:document.getElementById('stm-hmg-count').value,
+      mmg:document.getElementById('stm-mmg-count').value,
       mechanic:document.getElementById('stm-mechanic-need').checked,
       longDistance:document.getElementById('stm-long-distance').checked,
       apc:document.getElementById('stm-apc').value,
@@ -4292,7 +4319,7 @@ function stmUpdateTotal(){
   var g=function(id){ return Math.max(0,parseInt(document.getElementById(id).value)||0); };
   var officer=document.getElementById('stm-officer-need').checked?1:0;
   var mechanic=document.getElementById('stm-mechanic-need').checked?1:0;
-  var total=officer+g('stm-jco-count')+g('stm-others')+g('stm-medical-count')+g('stm-signal-count')+g('stm-apc')+g('stm-heavy')+g('stm-light')+mechanic;
+  var total=officer+g('stm-jco-count')+g('stm-others')+g('stm-medical-count')+g('stm-signal-count')+g('stm-hmg-count')+g('stm-mmg-count')+g('stm-apc')+g('stm-heavy')+g('stm-light')+mechanic;
   var el=document.getElementById('stm-total-display');
   if(el) el.textContent='👥 Total patrol size: '+total+' personnel';
 }
@@ -4306,6 +4333,8 @@ function stmLoadConfig(){
     document.getElementById('stm-others').value=cfg.others!=null?cfg.others:15;
     document.getElementById('stm-medical-count').value=cfg.medical!=null?cfg.medical:1;
     document.getElementById('stm-signal-count').value=cfg.signal!=null?cfg.signal:1;
+    document.getElementById('stm-hmg-count').value=cfg.hmg!=null?cfg.hmg:0;
+    document.getElementById('stm-mmg-count').value=cfg.mmg!=null?cfg.mmg:0;
     document.getElementById('stm-mechanic-need').checked=!!cfg.mechanic;
     // Note: long-distance is intentionally NOT restored — it resets fresh
     // each time so a restricted-range exclusion never silently carries
@@ -4321,6 +4350,8 @@ function stmResetDefaults(){
   document.getElementById('stm-others').value=15;
   document.getElementById('stm-medical-count').value=1;
   document.getElementById('stm-signal-count').value=1;
+  document.getElementById('stm-hmg-count').value=0;
+  document.getElementById('stm-mmg-count').value=0;
   document.getElementById('stm-mechanic-need').checked=false;
   document.getElementById('stm-long-distance').checked=false;
   document.getElementById('stm-apc').value=0;
@@ -4403,6 +4434,8 @@ function generateSuggestion(){
   var othersCount=Math.max(0,parseInt(document.getElementById('stm-others').value)||0);
   var medicalCount=Math.max(0,parseInt(document.getElementById('stm-medical-count').value)||0);
   var signalCount=Math.max(0,parseInt(document.getElementById('stm-signal-count').value)||0);
+  var hmgCount=Math.max(0,parseInt(document.getElementById('stm-hmg-count').value)||0);
+  var mmgCount=Math.max(0,parseInt(document.getElementById('stm-mmg-count').value)||0);
   var mechanicNeeded=document.getElementById('stm-mechanic-need').checked;
   var apcCount=Math.max(0,parseInt(document.getElementById('stm-apc').value)||0);
   var heavyCount=Math.max(0,parseInt(document.getElementById('stm-heavy').value)||0);
@@ -4505,6 +4538,35 @@ function generateSuggestion(){
   for(var s=0;s<signalCount;s++){
     var cs=take(signalPool,'Signal');
     if(!cs) warnings.push('No available Signal troop found for slot '+(s+1)+'.');
+  }
+
+  // HMG / MMG gunners — seated in the same specialist stage as Medical and
+  // Signal (same rest rules and female-cap logic), but ranked by GUN-DUTY
+  // ROTATION so the gun never falls on the same few trained troops: fewest
+  // gun tasks in the last 90 days first, then longest since last gun task.
+  // Gunners are NOT reserved: gun-trained troops are plentiful, so extra
+  // ones normally land in the "Others" seats through the usual fairness
+  // rotation. The results list then clearly marks who CARRIES the gun (the
+  // rotation pick) and who is gun-trained but not carrying (see
+  // renderStmResults / stmSwapGun).
+  var gunStats=stmGunStats(patrolDate);
+  function rankByGun(pool){
+    function cmp(a,b){ return stmGunCompare(a,b,gunStats,dutyPct,patrolDate); }
+    var rested=pool.filter(function(t){ return isRested(t.id); }).sort(cmp);
+    var resting=pool.filter(function(t){ return !isRested(t.id); }).sort(cmp);
+    return rested.concat(resting).map(function(t){ return t.id; });
+  }
+  var hmgPool=rankByGun(base.filter(function(t){return t.trade==='HMG';}));
+  for(var hg=0;hg<hmgCount;hg++){
+    var chg=take(hmgPool,'HMG — Gun'+(hmgCount>1?' '+(hg+1):''));
+    slots[slots.length-1].gun='HMG';
+    if(!chg) warnings.push('No available HMG troop found for gun '+(hg+1)+'.');
+  }
+  var mmgPool=rankByGun(base.filter(function(t){return t.trade==='MMG';}));
+  for(var mg=0;mg<mmgCount;mg++){
+    var cmg=take(mmgPool,'MMG — Gun'+(mmgCount>1?' '+(mg+1):''));
+    slots[slots.length-1].gun='MMG';
+    if(!cmg) warnings.push('No available MMG troop found for gun '+(mg+1)+'.');
   }
 
   if(mechanicNeeded){
@@ -4683,7 +4745,7 @@ function generateSuggestion(){
 
   othersChosen.forEach(function(id){ if(isFemale(id)) femaleCount++; slots.push({role:'Other Rank',chosenId:id,pool:generalPoolRankedFull,poolPos:generalPoolRankedFull.indexOf(id)}); });
   if(othersChosen.length<requestedOthers) warnings.push('Only '+othersChosen.length+' of '+requestedOthers+' "Others" seats could be filled — not enough available troops left.');
-  if(femaleCount>FEMALE_CAP) warnings.push('This patrol has '+femaleCount+' female troops, above the cap of '+FEMALE_CAP+'. This means a category rotation (Officer/JCO/Medical/Signal/Driver) had NO non-female alternative available for a role — the cap was intentionally not enforced there so the role wasn\'t left unfilled. Review before deploying.');
+  if(femaleCount>FEMALE_CAP) warnings.push('This patrol has '+femaleCount+' female troops, above the cap of '+FEMALE_CAP+'. This means a category rotation (Officer/JCO/Medical/Signal/HMG/MMG/Driver) had NO non-female alternative available for a role — the cap was intentionally not enforced there so the role wasn\'t left unfilled. Review before deploying.');
 
   if(minRestDays){
     slots.forEach(function(s){
@@ -4711,13 +4773,27 @@ function renderStmResults(warnings){
   if(sumEl) sumEl.textContent=(_stmPatrolType?_stmPatrolType+' · ':'')+(_stmPatrolDateISO?fmtDateLong(_stmPatrolDateISO):'')+' — availability, fairness &amp; conflicts checked against this date';
   document.getElementById('stm-warnings').innerHTML=warnings.length?
     '<div class="alert al-warn" style="margin-bottom:10px;">'+warnings.map(escHtml).join('<br>')+'</div>':'';
-  document.getElementById('stm-slots').innerHTML=_stmSlots.map(function(s,i){
+  var _gs=stmGunStats(_stmPatrolDateISO);
+  var _carriers={};
+  _stmSlots.forEach(function(sl){ var g=gunOfSlot(sl); if(g&&sl.chosenId){ (_carriers[g]=_carriers[g]||[]).push(sl.chosenId); } });
+  var _specSummary=[['Medical','<span style=\"color:#d32f2f;font-weight:900;\">✚</span>'],['Signal','📡']].map(function(r){
+    var seats=_stmSlots.filter(function(sl){return sl.role===r[0];});
+    if(!seats.length) return '';
+    var names=seats.filter(function(sl){return sl.chosenId;}).map(function(sl){var st=troopById(sl.chosenId);return st?escHtml(st.rank.toUpperCase()+' '+st.name.toUpperCase()):'';});
+    return '<div style="font-size:12.5px;margin-bottom:3px;">'+r[1]+' <strong>'+r[0]+'</strong>: '+(names.length?names.join(', '):'<span style="color:var(--red-light);">none</span>')+'</div>';
+  }).join('');
+  var _gunSummary=['MMG','HMG'].map(function(g){
+    var ids=_carriers[g]||[]; var seats=_stmSlots.filter(function(sl){return gunOfSlot(sl)===g;}).length;
+    if(!seats) return '';
+    return '<div style="font-size:12.5px;margin-bottom:3px;">🔫 <strong>'+g+'</strong> carried by: '+(ids.length?ids.map(function(id){var gt=troopById(id);return gt?escHtml(gt.rank.toUpperCase()+' '+gt.name.toUpperCase()):'';}).join(', '):'<span style="color:var(--red-light);">none</span>')+'</div>';
+  }).join('');
+  document.getElementById('stm-slots').innerHTML=((_specSummary+_gunSummary)?'<div style="padding:8px 10px;margin-bottom:6px;background:var(--surface2,rgba(127,127,127,0.08));border-radius:8px;">'+_specSummary+_gunSummary+'</div>':'')+_stmSlots.map(function(s,i){
     var t=s.chosenId?troopById(s.chosenId):null;
     var restrictedNote=(t&&t.restrictedRange)?' <span style="color:var(--tan);font-size:10.5px;">⚠ Restricted range</span>':'';
     var manualOpen=(_stmManualPickSlot===i);
     return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'+
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
-      '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">'+s.role+'</div>'+
+      '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">'+(gunOfSlot(s)?'🔫 ':(s.role==='Medical'?'<span style=\"color:#d32f2f;font-weight:900;\">✚</span> ':(s.role==='Signal'?'📡 ':'')))+s.role+'</div>'+
       '<div style="display:flex;gap:6px;flex-shrink:0;">'+
       '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:5px 9px;white-space:nowrap;" onclick="replaceStmSlot('+i+')" title="Next fairest alternative">🔁 Replace</button>'+
       '<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:5px 9px;white-space:nowrap;'+(manualOpen?'border-color:var(--tan);color:var(--tan);':'')+'" onclick="stmToggleManualPick('+i+')" title="Pick a specific troop">🔍</button>'+
@@ -4725,6 +4801,14 @@ function renderStmResults(warnings){
       '<div style="font-size:13.5px;margin-top:3px;white-space:normal;overflow-wrap:break-word;">'+
       (t?('<strong>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+'</strong>'+restrictedNote):'<span style="color:var(--red-light);">— none available —</span>')+
       '</div>'+
+      ((t&&!gunOfSlot(s)&&gunTrained(t))?(function(){
+        var carrierIdx=-1;
+        _stmSlots.forEach(function(sl,ix){ if(carrierIdx<0&&gunOfSlot(sl)===t.trade&&sl.chosenId) carrierIdx=ix; });
+        var note='<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">🔫 '+t.trade+'-trained · not carrying the gun'+(_gs[t.id]?(' · gun tasks: '+_gs[t.id].count):'')+'</div>';
+        if(carrierIdx>=0){ var ct=troopById(_stmSlots[carrierIdx].chosenId); note+='<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 9px;margin-top:4px;" onclick="stmSwapGun('+i+')">🔫 Carry the '+t.trade+' instead of '+escHtml(ct?ct.name.toUpperCase():'')+'</button>'; }
+        return note;
+      })():'')+
+      ((t&&gunOfSlot(s))?('<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Gun tasks (last '+GUN_ROTATION_WINDOW_DAYS+' days): <strong>'+((_gs[t.id]||{}).count||0)+'</strong>'+((_gs[t.id]&&_gs[t.id].last)?' · last '+daysSince(_gs[t.id].last,_stmPatrolDateISO)+' day(s) ago':' · never')+'</div>'):'')+
       (manualOpen?('<div style="position:relative;margin-top:6px;">'+
         '<input type="text" placeholder="Type name or rank to pick directly..." autocomplete="off" oninput="stmManualSearch('+i+',this.value)" style="font-size:13px;">'+
         '<div class="suggest-box" id="stm-manual-suggest-'+i+'" style="display:none;"></div>'+
@@ -4734,6 +4818,22 @@ function renderStmResults(warnings){
   stmUpdateRemainingCount();
   var remPanel=document.getElementById('stm-remaining-troops');
   if(remPanel&&remPanel.style.display!=='none') renderStmRemainingTroops();
+}
+// Swap the gun between the current carrier and another gun-trained troop of
+// the SAME type already in this patrol (e.g. two MMG-trained troops: pick
+// which one carries the MMG). Only the person changes — the gun seat stays
+// a gun seat, so the rotation history credits whoever actually carries it.
+function stmSwapGun(otherIdx){
+  var other=_stmSlots[otherIdx]; if(!other||!other.chosenId) return;
+  var ot=troopById(other.chosenId); if(!ot||!gunTrained(ot)) return;
+  var gi=-1;
+  _stmSlots.forEach(function(sl,ix){ if(gi<0&&gunOfSlot(sl)===ot.trade&&sl.chosenId) gi=ix; });
+  if(gi<0) return;
+  var gunSlot=_stmSlots[gi];
+  var tmp=gunSlot.chosenId; gunSlot.chosenId=other.chosenId; other.chosenId=tmp;
+  gunSlot.poolPos=gunSlot.pool.indexOf(gunSlot.chosenId);
+  other.poolPos=other.pool.indexOf(other.chosenId);
+  renderStmResults(stmLoneFemaleWarning());
 }
 function replaceStmSlot(i){
   var slot=_stmSlots[i];
@@ -4837,6 +4937,8 @@ function useSuggestedTeam(){
   commanderManuallyChanged=false;
   pendingDraftLogId=null;
   closeSuggestTeamModal();
+  _stmGunPending={};
+  _stmSlots.forEach(function(sl){ var g=gunOfSlot(sl); if(g&&sl.chosenId) _stmGunPending[sl.chosenId]=g; });
   editingPatrolId=null;
   document.getElementById('log-patrol-modal-title').textContent='Log New Patrol';
   document.getElementById('p-submit-btn').textContent='⚡ Log Patrol';
@@ -4861,7 +4963,7 @@ function saveDraftFromSuggestion(){
     id:uid('draft'),
     createdAt:new Date().toISOString(),
     troops:ids.slice(),
-    slots:_stmSlots.map(function(s){return {role:s.role,chosenId:s.chosenId};}),
+    slots:_stmSlots.map(function(s){return {role:s.role,chosenId:s.chosenId,gun:gunOfSlot(s)||undefined};}),
     plannedDate:plannedDate,
     type:_stmPatrolType||null
   };
@@ -5002,6 +5104,8 @@ function logDraftAsPatrol(id){
   selectedCommander=null;
   commanderManuallyChanged=false;
   pendingDraftLogId=id;
+  _stmGunPending={};
+  (d.slots||[]).forEach(function(sl){ var g=gunOfSlot(sl); if(g&&sl.chosenId&&ids.indexOf(sl.chosenId)>=0) _stmGunPending[sl.chosenId]=g; });
   closeDraftsModal();
   editingPatrolId=null;
   document.getElementById('log-patrol-modal-title').textContent='Log Patrol (from Draft)';
@@ -5234,6 +5338,11 @@ function dutyRefreshConflicts(){
   }
   var qual=(post&&post.qualRequired)||(type&&type.qualRequired)||'';
   if(qual&&dutySelectedTroops.length&&!dutyQualSatisfied(type,post)) warnMsgs.push('At least one assigned troop must hold qualification: '+qual+' — none currently do.');
+  var gunNeedV=postGunNeed(post);
+  if(gunNeedV&&dutySelectedTroops.length){
+    var gunHaveV=dutySelectedTroops.filter(function(tid){return isGunnerFor(troopById(tid),post.gunRequired);}).length;
+    if(gunHaveV<gunNeedV) warnMsgs.push('This post needs at least '+gunNeedV+' '+gunLabel(post.gunRequired)+' troop(s) — currently '+gunHaveV+' assigned.');
+  }
   var html='';
   if(blockMsgs.length) html+='<div class="alert al-danger" style="margin-bottom:8px;">🚫 '+blockMsgs.map(escHtml).join('<br>🚫 ')+'</div>';
   if(warnMsgs.length) html+='<div class="alert al-warn" style="margin-bottom:8px;">⚠ '+warnMsgs.map(escHtml).join('<br>⚠ ')+'</div>';
@@ -5408,6 +5517,11 @@ function saveDuty(){
   if(post&&(post.name==='Medical'||post.name==='Signal')&&!dutyQualSatisfied(type,post)){ showAlert('duty-alert','This post is role-locked to Role='+post.name+' — every assigned troop must have that Role.','danger'); return; }
   var qualNeeded=(post&&post.name!=='Medical'&&post.name!=='Signal'&&post.qualRequired)||(type&&type.qualRequired)||'';
   if(qualNeeded&&!dutyQualSatisfied(type,post)){ showAlert('duty-alert','At least one assigned troop must hold qualification: '+qualNeeded+'.','danger'); return; }
+  var gunNeedS=postGunNeed(post);
+  if(gunNeedS){
+    var gunHaveS=dutySelectedTroops.filter(function(tid){return isGunnerFor(troopById(tid),post.gunRequired);}).length;
+    if(gunHaveS<gunNeedS&&!confirm(post.name+' needs at least '+gunNeedS+' '+gunLabel(post.gunRequired)+' troop(s) but only '+gunHaveS+' assigned. Save anyway?')) return;
+  }
   // A patrol still sitting as an unlogged Draft means it's still ongoing
   // — we don't know when it'll actually finish, so that's what blocks
   // duty entirely, with no override, regardless of that draft's own
@@ -5830,6 +5944,8 @@ function dsAssignDriverQuota(date,slots,used,warnings){
     // enforced by a separate "at least one X-or-above" check that a
     // driver quota pick could accidentally break.
     if(post&&post.requiredRank) return false;
+    // Same reasoning for gunner-required posts: keep their seats free.
+    if(postGunNeed(post)) return false;
     return true;
   }
   function eligibleDrivers(slot){
@@ -5876,9 +5992,72 @@ function dsAssignDriverQuota(date,slots,used,warnings){
   fillCategory(sentryNightSlots,q.sentryNight||0,'Sentry (Night)');
   fillCategory(roamingSlots,q.roamingNight||0,'Roaming');
 }
+// Gunner pre-fill: for every Sentry post that requires MMG/HMG, reserve the
+// required number of gunners for EACH shift before the normal fill runs, so
+// an earlier post can never use up the gunners a later post needs. Uses the
+// same fairness+rotation scoring and eligibility as everyone else. Any
+// shortfall is reported live by dsGunShortfallWarnings().
+function dsAssignGunQuota(date,slots,used){
+  var groups={}, order=[];
+  slots.forEach(function(sl){
+    if(sl.category!=='Sentry'||!sl.postId) return;
+    var post=dutyPostById(sl.postId);
+    if(!postGunNeed(post)) return;
+    var key=sl.postId+'|'+sl.label;
+    if(!groups[key]){ groups[key]={post:post,slots:[]}; order.push(key); }
+    groups[key].slots.push(sl);
+  });
+  order.forEach(function(key){
+    var g=groups[key], post=g.post;
+    var need=Math.min(postGunNeed(post),g.slots.length);
+    for(var n=0;n<need;n++){
+      var slot=g.slots.filter(function(x){return !x.chosenId&&!x._preFilled;})[0];
+      if(!slot) break;
+      var isDay=isDayTime(slot.startTime);
+      var cands=D.troops.filter(function(t){
+        if(!isGunnerFor(t,post.gunRequired)) return false;
+        if(!isAvailable(t)||t.neverDuty) return false;
+        if(used.indexOf(t.id)>=0) return false;
+        if(t.gender==='Female') return false;
+        if(isNCE(t)||isRoamingOnlyRank(t)||isAdminTrade(t)) return false;
+        if(isContingencyExcluded(t.id,date,isDay?'day':'night')) return false;
+        // If every seat on this shift must be a gunner, they must also
+        // satisfy the post's minimum-rank rule.
+        if(post.requiredRank&&need>=g.slots.length&&!troopMeetsMinRank(t,post.requiredRank)) return false;
+        var c=dutyConflict(t.id,date,slot.startTime,slot.durationHours,null,_editingDutyDraftId,_dsPeriod);
+        if(c.duty||c.patrol||c.draftDuty) return false;
+        return true;
+      });
+      if(!cands.length) break;
+      cands.sort(function(a,b){ var sc=dsScoreWithRotation(a,slot)-dsScoreWithRotation(b,slot); return sc!==0?sc:compareSeniority(a,b); });
+      slot.chosenId=cands[0].id; slot.pool=[cands[0].id]; slot.poolPos=0; slot._preFilled=true; slot._gunQuota=true;
+      used.push(cands[0].id);
+    }
+  });
+}
+// Live check (re-run on every render, so it also reflects manual Replace
+// picks): warns for any gunner-required post shift with too few gunners.
+function dsGunShortfallWarnings(slots){
+  var out=[], groups={}, order=[];
+  (slots||[]).forEach(function(sl){
+    if(sl.category!=='Sentry'||!sl.postId) return;
+    var post=dutyPostById(sl.postId);
+    if(!postGunNeed(post)) return;
+    var key=sl.postId+'|'+sl.label;
+    if(!groups[key]){ groups[key]={post:post,label:sl.label,slots:[]}; order.push(key); }
+    groups[key].slots.push(sl);
+  });
+  order.forEach(function(key){
+    var g=groups[key], need=Math.min(postGunNeed(g.post),g.slots.length);
+    var have=g.slots.filter(function(sl){ var t=sl.chosenId?troopById(sl.chosenId):null; return t&&isGunnerFor(t,g.post.gunRequired); }).length;
+    if(have<need) out.push(g.label+': needs at least '+need+' '+gunLabel(g.post.gunRequired)+' — only '+have+' assigned.');
+  });
+  return out;
+}
 function dsFillSlots(date,slots){
   var used=[], warnings=[];
   dsAssignFemalePreferredGroups(date,slots,used,warnings);
+  dsAssignGunQuota(date,slots,used);
   dsAssignDriverQuota(date,slots,used,warnings);
   // Three passes so a shortage of Roaming-eligible Sergeants can never
   // starve Sentry of the Sergeants it needs (item 1 — previously, once
@@ -6129,7 +6308,8 @@ function generateDutySuggestion(){
 var _dsManualPickSlot=-1;
 function renderDsResults(){
   var warnEl=document.getElementById('ds-warnings');
-  warnEl.innerHTML=_dsWarnings.length?'<div class="alert al-warn" style="margin-bottom:10px;">⚠ '+_dsWarnings.map(escHtml).join('<br>⚠ ')+'</div>':'';
+  var _dsAllWarn=(_dsWarnings||[]).concat(dsGunShortfallWarnings(_dsSlots));
+  warnEl.innerHTML=_dsAllWarn.length?'<div class="alert al-warn" style="margin-bottom:10px;">⚠ '+_dsAllWarn.map(escHtml).join('<br>⚠ ')+'</div>':'';
   // Group by post (or standalone category for Roaming/Line Duty), then by
   // shift within that post — a post can now have several shifts in one
   // period (e.g. Morning/Midday/Afternoon), each with its own troops.
@@ -8260,6 +8440,74 @@ function troopMeetsPostRequirement(t,post){
   if(post.qualRequired) return isDutyQualified(t,post.qualRequired);
   return true;
 }
+// ── Gun-duty rotation (patrols) ─────────────────────────────────────────
+// Carrying the gun is the hardest task, so it is rotated among ALL gun-
+// trained troops of that type: whoever has carried it the FEWEST times in
+// the rolling window goes first; ties go to whoever carried it longest ago,
+// then the usual duty-% fairness. History lives in D.config.gunLog
+// ({tid,date,gun,pid}) — no database change, synced with the other config.
+var GUN_ROTATION_WINDOW_DAYS=90;
+var _stmGunPending={}; // {troopId:'MMG'|'HMG'} from the suggestion being logged
+function gunTrained(t){ return !!t&&(t.trade==='HMG'||t.trade==='MMG'); }
+function gunOfSlot(sl){
+  if(!sl) return '';
+  if(sl.gun==='HMG'||sl.gun==='MMG') return sl.gun;
+  var r=(sl.role||'');
+  return r.indexOf('HMG')===0?'HMG':(r.indexOf('MMG')===0?'MMG':'');
+}
+function stmGunStats(refDate){
+  var stats={};
+  function add(tid,date){
+    if(!tid||!date) return;
+    if(daysSince(date,refDate)>GUN_ROTATION_WINDOW_DAYS) return;
+    if(!stats[tid]) stats[tid]={count:0,last:null};
+    stats[tid].count++;
+    if(!stats[tid].last||date>stats[tid].last) stats[tid].last=date;
+  }
+  (D.config.gunLog||[]).forEach(function(e){ add(e.tid,e.date); });
+  // Unlogged saved drafts already hold a gun seat — count them so two
+  // suggestions made back-to-back don't hand the gun to the same person.
+  (D.drafts||[]).forEach(function(d){
+    (d.slots||[]).forEach(function(sl){ if(gunOfSlot(sl)&&sl.chosenId) add(sl.chosenId,d.plannedDate||(d.createdAt||'').slice(0,10)); });
+  });
+  return stats;
+}
+// Fewest gun tasks first; then longest since last gun task; then the
+// regular duty-% fairness; then name (stable, explainable order).
+function stmGunCompare(a,b,gunStats,dutyPct,refDate){
+  var ga=(gunStats[a.id]||{count:0}).count, gb=(gunStats[b.id]||{count:0}).count;
+  if(ga!==gb) return ga-gb;
+  var da=gunStats[a.id]&&gunStats[a.id].last?daysSince(gunStats[a.id].last,refDate):9999;
+  var db=gunStats[b.id]&&gunStats[b.id].last?daysSince(gunStats[b.id].last,refDate):9999;
+  if(da!==db) return db-da;
+  var d=(dutyPct[a.id]||0)-(dutyPct[b.id]||0);
+  if(d!==0) return d;
+  return (a.name||'').localeCompare(b.name||'');
+}
+function gunLogPurgePatrol(pid,keepTroopIds){
+  var before=(D.config.gunLog||[]).length;
+  D.config.gunLog=(D.config.gunLog||[]).filter(function(e){
+    if(e.pid!==pid) return true;
+    return keepTroopIds&&keepTroopIds.indexOf(e.tid)>=0;
+  });
+  return D.config.gunLog.length!==before;
+}
+// ── Gunner (HMG / MMG) requirement on Sentry posts ──────────────────────
+// A post can require at least gunMin gunners on EVERY shift: gunRequired is
+// 'MMG', 'HMG' or 'Any' (either). Not applied to role-locked Medical/Signal
+// posts or Female Preferred posts (gunners are never placed there).
+function isGunnerFor(t,req){
+  if(!t||!req) return false;
+  if(req==='Any') return t.trade==='MMG'||t.trade==='HMG';
+  return t.trade===req;
+}
+function postGunNeed(post){
+  if(!post||!post.gunRequired) return 0;
+  if(post.name==='Medical'||post.name==='Signal') return 0;
+  if(post.genderPref==='female') return 0;
+  return Math.max(1,parseInt(post.gunMin)||1);
+}
+function gunLabel(req){ return req==='Any'?'MMG/HMG':(req||''); }
 // True if the troop falls inside an active Contingency exclusion window
 // covering this date (temporarily committed elsewhere, e.g. another op).
 // A group's own "shift" (full/day/night) scopes when it applies: a
@@ -8668,7 +8916,7 @@ function renderSentryPostRows(){
   el.innerHTML=posts.map(function(p,i){
     var open=(expandedPostIdx===i);
     var summary=p.continuous?(p.dayStrength+' troop, 24h continuous'):(p.dayStrength+' day / '+p.nightStrength+' night');
-    var tags=(p.qualRequired?' · 🎖 '+escHtml(p.qualRequired):'')+(p.requiredRank?' · ≥'+escHtml(p.requiredRank):'')+(p.genderPref==='female'?' · ♀ preferred':'');
+    var tags=(p.qualRequired?' · 🎖 '+escHtml(p.qualRequired):'')+(p.requiredRank?' · ≥'+escHtml(p.requiredRank):'')+(p.genderPref==='female'?' · ♀ preferred':'')+(p.gunRequired?' · 🔫 ≥'+(p.gunMin||1)+' '+gunLabel(p.gunRequired):'');
     var head='<div onclick="togglePostExpand('+i+')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;'+(open?'margin-bottom:10px;':'')+'">'+
       '<div><strong style="font-size:14px;">'+escHtml(p.name)+'</strong>'+(p.active?'':' <span style="font-size:10px;color:var(--text-muted);">(inactive)</span>')+
       '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px;">'+summary+tags+'</div></div>'+
@@ -8693,6 +8941,15 @@ function renderSentryPostRows(){
       '<div class="fg" style="margin-bottom:0;margin-top:6px;"><label class="field-label">Minimum Rank <span style="font-weight:400;color:var(--text-muted);">(at least 1 troop must be this rank or above)</span></label><select onchange="updateSentryPostField('+i+',\'requiredRank\',this.value)">'+
       ('<option value="">None</option>'+(D.config.ranks||[]).map(function(r){return '<option value="'+escHtml(r)+'"'+(p.requiredRank===r?' selected':'')+'>'+escHtml(r)+'</option>';}).join(''))+
       '</select></div>'+
+      ((p.genderPref==='female'||p.name==='Medical'||p.name==='Signal')?'':(
+      '<div class="fr" style="margin-top:6px;">'+
+      '<div class="fg" style="margin-bottom:0;"><label class="field-label">Gunner Required <span style="font-weight:400;color:var(--text-muted);">(every shift)</span></label><select onchange="updateSentryPostField('+i+',\'gunRequired\',this.value)">'+
+      '<option value=""'+(!p.gunRequired?' selected':'')+'>None</option>'+
+      '<option value="MMG"'+(p.gunRequired==='MMG'?' selected':'')+'>MMG</option>'+
+      '<option value="HMG"'+(p.gunRequired==='HMG'?' selected':'')+'>HMG</option>'+
+      '<option value="Any"'+(p.gunRequired==='Any'?' selected':'')+'>MMG or HMG</option></select></div>'+
+      (p.gunRequired?'<div class="fg" style="margin-bottom:0;"><label class="field-label">Minimum Gunners</label><input type="number" min="1" value="'+(p.gunMin||1)+'" onchange="updateSentryPostField('+i+',\'gunMin\',this.value)"></div>':'')+
+      '</div>'))+
       '</div>';
   }).join('');
 }
@@ -8703,9 +8960,13 @@ function addSentryPost(){
   var gender=document.getElementById('new-post-gender').value;
   var qual=document.getElementById('new-post-qual').value;
   var continuous=document.getElementById('new-post-continuous').checked;
+  var gunReq=document.getElementById('new-post-gun').value;
+  var gunMin=Math.max(1,parseInt(document.getElementById('new-post-gun-min').value)||1);
   if(!name){ showAlert('post-alert','Please enter a post name.','danger'); return; }
-  D.config.dutyPosts.push({id:uid('post'),name:name,active:true,dayStrength:day,nightStrength:continuous?day:night,genderPref:gender,qualRequired:qual,continuous:continuous});
+  D.config.dutyPosts.push({id:uid('post'),name:name,active:true,dayStrength:day,nightStrength:continuous?day:night,genderPref:gender,qualRequired:qual,continuous:continuous,gunRequired:gunReq,gunMin:gunMin});
   document.getElementById('new-post-name').value='';
+  document.getElementById('new-post-gun').value='';
+  document.getElementById('new-post-gun-min').value='1';
   document.getElementById('new-post-day').value='1';
   document.getElementById('new-post-night').value='1';
   document.getElementById('new-post-gender').value='none';
@@ -8726,6 +8987,7 @@ function toggleSentryPostActive(i){
 function updateSentryPostField(i,field,val){
   var p=D.config.dutyPosts[i]; if(!p) return;
   if(field==='dayStrength'||field==='nightStrength') val=parseInt(val)||0;
+  if(field==='gunMin') val=Math.max(1,parseInt(val)||1);
   if(field==='name'){ val=val.trim(); if(!val){ renderSentryPostRows(); return; } }
   p[field]=val;
   if(field==='continuous'&&val) p.nightStrength=p.dayStrength;
@@ -9413,7 +9675,7 @@ function showDashDetail(kind,extra){
   } else if(kind==='duty-posts'){
     var aposts=(D.config.dutyPosts||[]).filter(function(p){return p.active;});
     title='Active Posts ('+aposts.length+')';
-    body=aposts.length?aposts.map(function(p){return dashDetailRow(p.name+(p.continuous?' (Continuous)':''),p.continuous?(p.dayStrength+' troop, 24h'):(p.dayStrength+' day / '+p.nightStrength+' night')+(p.qualRequired?' · needs '+p.qualRequired:''));}).join(''):'';
+    body=aposts.length?aposts.map(function(p){return dashDetailRow(p.name+(p.continuous?' (Continuous)':''),p.continuous?(p.dayStrength+' troop, 24h'):(p.dayStrength+' day / '+p.nightStrength+' night')+(p.qualRequired?' · needs '+p.qualRequired:'')+(postGunNeed(p)?' · needs '+postGunNeed(p)+' '+gunLabel(p.gunRequired):''));}).join(''):'';
   } else if(kind==='duty-upcoming'){
     var up=upcomingDuties();
     var upIds={}; up.forEach(function(d){ (d.troops||[]).forEach(function(tid){ upIds[tid]=true; }); });
@@ -9557,6 +9819,7 @@ function editPatrol(id){
 function cancelEditPatrol(){
   editingPatrolId=null;
   pendingDraftLogId=null;
+  _stmGunPending={};
   selectedTroops=[]; selectedCommander=null; commanderManuallyChanged=false;
   document.getElementById('p-date').value=''; document.getElementById('p-area').value=''; document.getElementById('p-dur').value=''; document.getElementById('p-route').value=''; document.getElementById('p-rem').value='';
   renderSelected();
@@ -9597,6 +9860,7 @@ function logPatrol(){
     ep.commanderAuto=commanderManuallyChanged?(selectedCommander?false:null):ep.commanderAuto;
     ep.ptlId=patrolDisplayId(ep); // keep the displayed year in sync if the date changed
     remoteSavePatrol(ep);
+    if(gunLogPurgePatrol(ep.id,ep.troops||[])) remoteSaveConfig();
     audit('Patrol edited: '+ep.ptlId+' | '+type+' | '+(area||'No sector'));
     showAlert('log-alert','Patrol '+ep.ptlId+' updated successfully!','success');
     editingPatrolId=null;
@@ -9627,6 +9891,10 @@ function logPatrol(){
     newPatrol.ptlId=patrolDisplayId(newPatrol);
     var ptlId=newPatrol.ptlId;
     D.patrols.push(newPatrol);
+    Object.keys(_stmGunPending||{}).forEach(function(tid){
+      if(selectedTroops.indexOf(tid)>=0) D.config.gunLog.push({tid:tid,date:date,gun:_stmGunPending[tid],pid:newPatrol.id});
+    });
+    _stmGunPending={};
     remoteSavePatrol(newPatrol);
     remoteSaveConfig();
     audit('Patrol logged: '+ptlId+' | '+type+' | '+(area||'No sector')+' | '+selectedTroops.length+' troops');
@@ -9837,9 +10105,9 @@ function populateTradeDropdown(){
   var sel=document.getElementById('t-trade');
   if(!sel) return;
   var cur=sel.value;
-  var fixed=['General','Medical','Signal','Driver','Mechanic','Administration','POB Commander'];
-  var fixedLabels={General:'General',Medical:'Medical',Signal:'Signal',Driver:'Driver',Mechanic:'Vehicle Mechanic',Administration:'Administration','POB Commander':'POB Commander'};
-  var custom=(D.config.customRoles||[]);
+  var fixed=['General','Medical','Signal','HMG','MMG','Driver','Mechanic','Administration','POB Commander'];
+  var fixedLabels={General:'General',Medical:'Medical',Signal:'Signal',HMG:'HMG',MMG:'MMG',Driver:'Driver',Mechanic:'Vehicle Mechanic',Administration:'Administration','POB Commander':'POB Commander'};
+  var custom=(D.config.customRoles||[]).filter(function(r){return fixed.indexOf(r)<0;});
   sel.innerHTML=fixed.map(function(r){return '<option value="'+escHtml(r)+'">'+escHtml(fixedLabels[r])+'</option>';}).join('')+
     custom.map(function(r){return '<option value="'+escHtml(r)+'">'+escHtml(r)+'</option>';}).join('');
   if(cur&&(fixed.indexOf(cur)>=0||custom.indexOf(cur)>=0)) sel.value=cur;
@@ -10913,7 +11181,7 @@ function renderSysInfo(){ var sz=JSON.stringify(D).length; document.getElementBy
 // DELETE
 // =====================================================================
 var pendingDel=null;
-function confirmDel(type,id){ requirePin(function(){ pendingDel={type:type,id:id}; document.getElementById('del-modal').classList.add('open'); document.getElementById('del-confirm').onclick=function(){ if(pendingDel.type==='patrol'){var p=D.patrols.find(function(x){return x.id===pendingDel.id;});if(p) audit('Patrol deleted: '+(p.ptlId||p.id));D.patrols=D.patrols.filter(function(p){return p.id!==pendingDel.id;});remoteDeletePatrol(pendingDel.id);}else{var t=D.troops.find(function(x){return x.id===pendingDel.id;});if(t) audit('Troop deleted: '+upLabel(t.rank,t.name));D.troops=D.troops.filter(function(t){return t.id!==pendingDel.id;});D.patrols.forEach(function(p){p.troops=(p.troops||[]).filter(function(id){return id!==pendingDel.id;});});remoteDeleteTroop(pendingDel.id);} saveData(); closeModal('del-modal'); pendingDel=null; var active=document.querySelector('.section.active'); if(active){var aid=active.id;if(aid==='dashboard') renderDash();if(aid==='patrol-log') renderTable();if(aid==='troops') renderRoster();if(aid==='report') genReport();if(aid==='inactive') renderInactive(0);} }; }); }
+function confirmDel(type,id){ requirePin(function(){ pendingDel={type:type,id:id}; document.getElementById('del-modal').classList.add('open'); document.getElementById('del-confirm').onclick=function(){ if(pendingDel.type==='patrol'){var p=D.patrols.find(function(x){return x.id===pendingDel.id;});if(p) audit('Patrol deleted: '+(p.ptlId||p.id));D.patrols=D.patrols.filter(function(p){return p.id!==pendingDel.id;});if(gunLogPurgePatrol(pendingDel.id,null)) remoteSaveConfig();remoteDeletePatrol(pendingDel.id);}else{var t=D.troops.find(function(x){return x.id===pendingDel.id;});if(t) audit('Troop deleted: '+upLabel(t.rank,t.name));D.troops=D.troops.filter(function(t){return t.id!==pendingDel.id;});D.patrols.forEach(function(p){p.troops=(p.troops||[]).filter(function(id){return id!==pendingDel.id;});});remoteDeleteTroop(pendingDel.id);} saveData(); closeModal('del-modal'); pendingDel=null; var active=document.querySelector('.section.active'); if(active){var aid=active.id;if(aid==='dashboard') renderDash();if(aid==='patrol-log') renderTable();if(aid==='troops') renderRoster();if(aid==='report') genReport();if(aid==='inactive') renderInactive(0);} }; }); }
 
 ['del-modal','troops-modal','profile-modal','dash-detail-modal','troop-form-modal','donors-modal','drafts-modal'].forEach(function(id){ document.getElementById(id).addEventListener('click',function(e){if(e.target===this)closeModal(id);}); });
 document.getElementById('draft-edit-modal').addEventListener('click',function(e){ if(e.target===this) cancelDraftEdit(); });
