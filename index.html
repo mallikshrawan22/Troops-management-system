@@ -5069,6 +5069,14 @@ function printRoleBadge(info){
   var lbl={CMD:'&#9733; PATROL CDR',HMG:'HMG',MMG:'MMG',MED:'&#10010; MEDICAL',SIG:'SIGNAL',MEC:'&#9881; MECHANIC',DRV:'DRIVER'+(info.grade?' &middot; '+info.grade:'')};
   return '<span class="rb rb-'+info.key.toLowerCase()+'">'+lbl[info.key]+'</span>';
 }
+// Phone cell for prints: shows local and WhatsApp numbers (one line each; single line if identical).
+function printPhones(t){
+  var l=(t.phoneLocal||'').trim(), w=(t.phoneWa||'').trim();
+  if(!l&&!w) return '—';
+  if(l&&w&&l===w) return escHtml(l);
+  var out=[]; if(l) out.push('L: '+escHtml(l)); if(w) out.push('WA: '+escHtml(w));
+  return out.join('<br>');
+}
 // Unit text without the role tag that now has its own column.
 function printUnitClean(t){
   return (t.unit||'').replace(PRINT_ROLE_RX,'').replace(/\s{2,}/g,' ').trim();
@@ -5082,13 +5090,13 @@ function printPatrolDraft(id){
   (d.slots||[]).forEach(function(sl){ var g=gunOfSlot(sl); if(g&&sl.chosenId) gunOf[sl.chosenId]=g; });
    var _cmdId=draftCmdId(d)||pickSeniorTroopId(troops.map(function(x){return x.id;}));
   var trn={};
-  var rows=troops.map(function(t,i){ var ri=printRoleInfo(t,slotMode?{g:gunOf[t.id]||''}:null); if(ri&&ri.trained){ (trn[ri.key]=trn[ri.key]||[]).push(t.rank.toUpperCase()+' '+t.name.toUpperCase()); ri=null; } var isCmd=(t.id===_cmdId); var unitTxt=t.unit||''; var badges=(isCmd&&ri)?'<div class=\"rb-stack\">'+printRoleBadge({key:'CMD'})+printRoleBadge(ri)+'</div>':(isCmd?printRoleBadge({key:'CMD'}):printRoleBadge(ri)); return '<tr><td>'+(i+1)+'</td><td>'+(t.sn||'')+'</td><td>'+t.rank.toUpperCase()+'</td><td>'+t.name.toUpperCase()+'</td><td>'+badges+'</td><td>'+escHtml(unitTxt)+'</td></tr>'; }).join('');
+  var rows=troops.map(function(t,i){ var ri=printRoleInfo(t,slotMode?{g:gunOf[t.id]||''}:null); if(ri&&ri.trained){ (trn[ri.key]=trn[ri.key]||[]).push(t.rank.toUpperCase()+' '+t.name.toUpperCase()); ri=null; } var isCmd=(t.id===_cmdId); var unitTxt=t.unit||''; var badges=(isCmd&&ri)?'<div class=\"rb-stack\">'+printRoleBadge({key:'CMD'})+printRoleBadge(ri)+'</div>':(isCmd?printRoleBadge({key:'CMD'}):printRoleBadge(ri)); return '<tr><td>'+(i+1)+'</td><td>'+(t.sn||'')+'</td><td>'+t.rank.toUpperCase()+'</td><td>'+t.name.toUpperCase()+'</td><td>'+badges+'</td><td>'+escHtml(t.bloodGroup||'—')+'</td><td>'+escHtml(t.weaponNumber||'—')+'</td><td style="font-size:12.5px;">'+printPhones(t)+'</td></tr>'; }).join('');
   // Gun-trained troops who are NOT carrying a gun: listed once as plain text under the table, never as row badges.
   var legend=['MMG','HMG'].filter(function(k){return trn[k]&&trn[k].length;}).map(function(k){return '<div style=\"margin-top:8px;font-size:12px;font-weight:700;color:#444;\">Also '+k+'-trained (not on gun): '+escHtml(trn[k].join(', '))+'</div>';}).join('');
   var win=window.open('','_blank','width=900,height=700');
   win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Patrol Draft</title><style>body{font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;background:#fff;color:#000;margin:0;padding:20px;font-size:16px;letter-spacing:0.3px;}.hdr{text-align:center;border-bottom:2px solid #2d5a3d;padding-bottom:12px;margin-bottom:20px;}.hdr h2{margin:0 0 4px;font-size:18px;color:#1a3a2a;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:900;letter-spacing:-0.3px;}.hdr p{margin:2px 0;font-size:13px;font-weight:700;color:#555;}table{width:100%;border-collapse:collapse;font-size:14.5px;}th{background:#2d5a3d;color:#fff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:800;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;padding:8px 10px;text-align:left;}td{padding:7px 10px;border-bottom:1px solid #b8c4b8;font-weight:800;color:#000;}tr:nth-child(even) td{background:#f8f8f8;}tr{page-break-inside:avoid;}.footer{margin-top:16px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px;}@media print{@page{margin:1.5cm;size:A4;}button{display:none!important;}thead{display:table-header-group;}}'+PRINT_ROLE_CSS+'</style></head><body>'+
     '<div class="hdr"><div style="font-size:12px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">'+(s.classification||'')+(s.classification?' — ':'')+(s.pob||'')+'</div><h2>PATROL DRAFT — '+(d.type?escHtml(d.type).toUpperCase():'PROPOSED TEAM')+'</h2><p style="font-size:15px;font-weight:900;color:#1a3a2a;">'+(d.plannedDate?('Planned for '+fmtDateLong(d.plannedDate)):'No planned date set')+'</p><p>Generated: '+nowStr()+(s.commander?' · Commanding: '+s.commander:'')+'</p></div>'+
-    '<table><thead><tr><th>S.No</th><th>Personal No.</th><th>Rank</th><th>Name</th><th>Role</th><th>Unit</th></tr></thead><tbody>'+rows+'</tbody></table>'+legend+
+    '<table><thead><tr><th>S.No</th><th>Personal No.</th><th>Rank</th><th>Name</th><th>Role</th><th>Blood Group</th><th>Weapon No.</th><th>Phone</th></tr></thead><tbody>'+rows+'</tbody></table>'+legend+
     '<div class="footer">'+(s.pob||'')+' Troops Management System · Patrol Draft · '+nowStr()+'</div>'+
     '<div style="margin-top:16px;text-align:center;"><button onclick="window.print()" style="padding:10px 24px;background:#2d5a3d;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer;font-weight:700;">🖨 Print</button></div></body></html>');
   win.document.close(); win.focus();
@@ -10998,7 +11006,7 @@ function printReport(){
     var tH=tp.reduce(function(sum,p){return sum+(parseFloat(p.duration)||0);},0);
     var part=tp.length>0;
     var cdrCount=tp.filter(function(p){return p.commander===t.id;}).length;
-    return '<tr><td>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+(cdrCount>0?' <span style="color:#8a6d1f;font-weight:700;">('+cdrCount+'x CDR)</span>':'')+'</td><td style="text-align:center;">'+(t.bloodGroup||'—')+'</td><td style="text-align:center;">'+(t.weaponNumber||'—')+'</td><td style="text-align:center;font-size:12px;">'+(t.phoneLocal||t.phoneWa||'—')+'</td><td style="text-align:center;">'+tp.length+'</td><td style="text-align:center;">'+(tH>0?tH.toFixed(1):'—')+'</td><td style="text-align:center;"><strong style="color:'+(part?'#2d5a3d':'#8b1a1a')+';">'+(part?'DEPLOYED':'NOT DEP.')+'</strong></td></tr>';
+    return '<tr><td>'+t.rank.toUpperCase()+' '+t.name.toUpperCase()+(cdrCount>0?' <span style="color:#8a6d1f;font-weight:700;">('+cdrCount+'x CDR)</span>':'')+'</td><td style="text-align:center;">'+(t.bloodGroup||'—')+'</td><td style="text-align:center;">'+(t.weaponNumber||'—')+'</td><td style="text-align:center;font-size:12px;">'+printPhones(t)+'</td><td style="text-align:center;">'+tp.length+'</td><td style="text-align:center;">'+(tH>0?tH.toFixed(1):'—')+'</td><td style="text-align:center;"><strong style="color:'+(part?'#2d5a3d':'#8b1a1a')+';">'+(part?'DEPLOYED':'NOT DEP.')+'</strong></td></tr>';
   }).join('');
 
   var win=window.open('','_blank','width=980,height=760');
@@ -11040,7 +11048,7 @@ function printReport(){
     (patrolRows?'<table><colgroup><col style="width:12%"><col style="width:11%"><col style="width:12%"><col style="width:17%"><col style="width:18%"><col style="width:9%"><col style="width:21%"></colgroup>'+
     '<thead><tr><th>Ptl ID</th><th>Date</th><th>Type</th><th>Sector</th><th>Commander</th><th>Hrs</th><th>Remarks / Route</th></tr></thead><tbody>'+patrolRows+'</tbody></table>':'<div style="color:#888;font-size:12px;">No patrols in this period.</div>')+
     '<div class="sub-hdr">Troop Participation</div>'+
-    '<table><colgroup><col style="width:26%"><col style="width:10%"><col style="width:14%"><col style="width:16%"><col style="width:9%"><col style="width:9%"><col style="width:16%"></colgroup>'+
+    '<table><colgroup><col style="width:22%"><col style="width:9%"><col style="width:13%"><col style="width:22%"><col style="width:8%"><col style="width:8%"><col style="width:18%"></colgroup>'+
     '<thead><tr><th>Name &amp; Rank</th><th>Blood Grp</th><th>Weapon No.</th><th>Phone</th><th>Ptls</th><th>Hours</th><th>Status</th></tr></thead><tbody>'+troopRows+'</tbody></table>'+
     '<div class="footer">'+(s.pob||'')+' Troops Management System · Patrol Report · '+nowStr()+'</div>'+
     '<div style="margin-top:16px;text-align:center;" class="no-print"><button onclick="window.print()" style="padding:10px 24px;background:#2d5a3d;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer;font-weight:700;">🖨 Print / Save PDF</button></div>'+
