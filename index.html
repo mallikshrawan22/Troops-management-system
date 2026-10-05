@@ -7354,8 +7354,7 @@ function printShiftDetails(dateISO,shiftKey,part){
       rowsHtml+='<tr><td>'+(d.dutyId||'—')+'</td><td>'+escHtml(d.type)+'</td><td>'+(d.startTime||'')+'–'+shiftEndTime(d.startTime,d.durationHours)+' ('+(d.durationHours||'—')+'h)</td><td style="font-size:11px;">'+(sortTroops((d.troops||[]).map(troopById).filter(Boolean)).map(function(t){return upLabel(t.rank,t.name);}).join(', ')||'—')+'</td></tr>';
     });
   }
-  var body='<div class="info-grid"><div class="info-box"><div class="info-num">'+list.length+'</div><div class="info-lbl">Duty Entries</div></div><div class="info-box"><div class="info-num">'+totH.toFixed(1)+'</div><div class="info-lbl">Total Hours</div></div><div class="info-box"><div class="info-num">'+Object.keys(allTroops).length+'</div><div class="info-lbl">Troops Assigned</div></div><div class="info-box"><div class="info-num">'+posts.length+'</div><div class="info-lbl">Posts Covered</div></div></div>'+
-    '<div class="sub-hdr">Entries — Grouped by Post</div><table><thead><tr><th>Duty ID</th><th>Type</th><th>Timing</th><th>Troops</th></tr></thead><tbody>'+rowsHtml+'</tbody></table>';
+  var body='<div class="sub-hdr">Entries — Grouped by Post</div><table><thead><tr><th>Duty ID</th><th>Type</th><th>Timing</th><th>Troops</th></tr></thead><tbody>'+rowsHtml+'</tbody></table>';
   var subtitle='<p style="font-size:15px;font-weight:900;color:#5a0f1a;">'+fmtDateLong(dateISO)+'</p>';
   dutyReportWindow(rt+'SHIFT DETAILS — '+(shiftKey==='day'?'☀ DAY SHIFT':'🌙 NIGHT SHIFT'),subtitle,body);
 }
