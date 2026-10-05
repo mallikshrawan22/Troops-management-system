@@ -1,5 +1,5 @@
 // Patrol Tracker — offline app shell service worker
-var CACHE_NAME = 'patrol-tracker-shell-v9';
+var CACHE_NAME = 'patrol-tracker-shell-v10';
 var SHELL_FILES = [
   './',
   './index.html',
