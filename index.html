@@ -6661,11 +6661,24 @@ function renderDutyDraftsList(){
       '</div></div>';
   }).join('');
 }
-function printDutyDraft(id){
+// ── Roaming secrecy split ──────────────────────────────────────────────
+// Every duty print is produced as TWO separate files: (1) Sentry + Line Duty
+// + everything else, with no Roaming anywhere in it, and (2) Roaming only.
+// That way the Sentry file can be circulated without exposing who is on
+// Roaming. isRoamingDuty() works on both logged duties (d.type) and draft
+// records (r.category).
+function isRoamingDuty(d){ return !!d&&(d.type==='Roaming'||d.category==='Roaming'); }
+function dutySplitPrint(fn,hasRoaming){
+  fn('main');
+  if(hasRoaming) fn('roaming');
+}
+function printDutyDraft(id,part){
   var d=D.dutyDrafts.find(function(x){return x.id===id;});
   if(!d) return;
+  if(!part){ dutySplitPrint(function(p){printDutyDraft(id,p);},(d.records||[]).some(isRoamingDuty)); return; }
   var s=D.settings;
-  var records=(d.records||[]).slice().sort(function(a,b){
+  var dTitle=part==='roaming'?'ROAMING DUTY DRAFT — RESTRICTED':'DUTY DRAFT';
+  var records=(d.records||[]).filter(function(r){return isRoamingDuty(r)===(part==='roaming');}).sort(function(a,b){
     var oa=dutyPostSortIndex(a.postName), ob=dutyPostSortIndex(b.postName);
     if(oa!==ob) return oa-ob;
     return nightAwareMin(a.startTime,d.period)-nightAwareMin(b.startTime,d.period);
@@ -6680,10 +6693,11 @@ function printDutyDraft(id){
     rows+='<tr><td>'+escHtml(r.category)+'</td><td>'+r.startTime+'–'+endT+' ('+r.durationHours+'h)</td><td>'+escHtml(names)+'</td></tr>';
   });
   var win=window.open('','_blank','width=900,height=700');
-  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Duty Draft</title><style>body{font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;background:#fff;color:#000;margin:0;padding:20px;font-size:16px;letter-spacing:0.3px;}.hdr{text-align:center;border-bottom:2px solid #8b1a2b;padding-bottom:12px;margin-bottom:20px;}.hdr h2{margin:0 0 4px;font-size:18px;color:#5a0f1a;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:900;letter-spacing:-0.3px;}.hdr p{margin:2px 0;font-size:13px;font-weight:700;color:#555;}.shift-tag{display:inline-block;font-size:16px;font-weight:800;letter-spacing:0.5px;color:#8b1a2b;}table{width:100%;border-collapse:collapse;font-size:14.5px;}th{background:#8b1a2b;color:#fff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:800;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;padding:8px 10px;text-align:left;}td{padding:7px 10px;border-bottom:1px solid #d9b8be;vertical-align:top;font-weight:800;color:#000;}tr:nth-child(even) td{background:#faf8f8;}.grp-row td{background:#f2e4e6!important;color:#5a0f1a;font-weight:800;font-size:12px;letter-spacing:0.6px;text-transform:uppercase;padding:7px 10px;border-top:2px solid #8b1a2b;border-bottom:1px solid #8b1a2b;}tr{page-break-inside:avoid;}.footer{margin-top:16px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px;}@media print{@page{margin:1.5cm;size:A4;}button{display:none!important;}thead{display:table-header-group;}}</style></head><body>'+
-    '<div class="hdr"><div style="font-size:12px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">'+(s.classification||'')+(s.classification?' — ':'')+(s.pob||'')+'</div><h2>DUTY DRAFT — '+(d.period==='day'?'☀ DAY SHIFT':'🌙 NIGHT SHIFT')+'</h2><p style="font-size:15px;font-weight:900;color:#5a0f1a;">Planned for '+fmtDateLong(d.plannedDate)+'</p><p>Generated: '+nowStr()+(s.commander?' · Commanding: '+s.commander:'')+'</p></div>'+
+  if(!win){ alert('Pop-up blocked — please allow pop-ups so both duty files can open.'); return; }
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+dTitle+'</title><style>body{font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;background:#fff;color:#000;margin:0;padding:20px;font-size:16px;letter-spacing:0.3px;}.hdr{text-align:center;border-bottom:2px solid #8b1a2b;padding-bottom:12px;margin-bottom:20px;}.hdr h2{margin:0 0 4px;font-size:18px;color:#5a0f1a;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:900;letter-spacing:-0.3px;}.hdr p{margin:2px 0;font-size:13px;font-weight:700;color:#555;}.shift-tag{display:inline-block;font-size:16px;font-weight:800;letter-spacing:0.5px;color:#8b1a2b;}table{width:100%;border-collapse:collapse;font-size:14.5px;}th{background:#8b1a2b;color:#fff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:800;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;padding:8px 10px;text-align:left;}td{padding:7px 10px;border-bottom:1px solid #d9b8be;vertical-align:top;font-weight:800;color:#000;}tr:nth-child(even) td{background:#faf8f8;}.grp-row td{background:#f2e4e6!important;color:#5a0f1a;font-weight:800;font-size:12px;letter-spacing:0.6px;text-transform:uppercase;padding:7px 10px;border-top:2px solid #8b1a2b;border-bottom:1px solid #8b1a2b;}tr{page-break-inside:avoid;}.footer{margin-top:16px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px;}@media print{@page{margin:1.5cm;size:A4;}button{display:none!important;}thead{display:table-header-group;}}</style></head><body>'+
+    '<div class="hdr"><div style="font-size:12px;font-weight:700;color:#999;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">'+(s.classification||'')+(s.classification?' — ':'')+(s.pob||'')+'</div><h2>'+dTitle+' — '+(d.period==='day'?'☀ DAY SHIFT':'🌙 NIGHT SHIFT')+'</h2><p style="font-size:15px;font-weight:900;color:#5a0f1a;">Planned for '+fmtDateLong(d.plannedDate)+'</p><p>Generated: '+nowStr()+(s.commander?' · Commanding: '+s.commander:'')+'</p></div>'+
     '<table><thead><tr><th>Type</th><th>Time</th><th>Troops</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-    '<div class="footer">'+(s.pob||'')+' Troops Management System · Duty Draft · '+nowStr()+'</div>'+
+    '<div class="footer">'+(s.pob||'')+' Troops Management System · '+dTitle+' · '+nowStr()+'</div>'+
     '<div style="margin-top:16px;text-align:center;"><button onclick="window.print()" style="padding:10px 24px;background:#8b1a2b;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer;font-weight:700;">🖨 Print</button></div></body></html>');
   win.document.close(); win.focus();
 }
@@ -7072,8 +7086,10 @@ function clearDutyHistoryFilters(){
   document.getElementById('dh-sort').value='date-desc';
   renderDutyHistoryList();
 }
-function printDutyHistory(){
+function printDutyHistory(part){
   var rows=dutyHistoryFilteredRows();
+  if(!part){ dutySplitPrint(function(p){printDutyHistory(p);},rows.some(isRoamingDuty)); return; }
+  rows=rows.filter(function(d){return isRoamingDuty(d)===(part==='roaming');});
   var totH=rows.reduce(function(sum,d){return sum+(parseFloat(d.durationHours)||0);},0);
   var rowsHtml=rows.map(function(d){
     var status=dutyStatusOf(d);
@@ -7090,13 +7106,13 @@ function printDutyHistory(){
   }).join('');
   var w=window.open('','_blank');
   if(!w) return;
-  w.document.write('<html><head><title>Duty History</title><style>'+
+  w.document.write('<html><head><title>'+(part==='roaming'?'Roaming Duty History':'Duty History')+'</title><style>'+
     ''+
     'body{font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;padding:24px;color:#000;} h1{font-size:18px;margin-bottom:2px;font-weight:700;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,\'Helvetica Neue\',Arial,sans-serif;font-weight:900;letter-spacing:-0.3px;} '+
     'p{font-size:12px;color:#666;margin-top:0;} table{width:100%;border-collapse:collapse;margin-top:14px;font-size:11px;} '+
     'th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;} th{background:#f2f2f2;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;font-size:10.5px;}'+
     '</style></head><body>'+
-    '<h1>Duty History</h1>'+
+    '<h1>'+(part==='roaming'?'RESTRICTED · ROAMING — ':'')+'Duty History</h1>'+
     '<p>'+rows.length+' duties · '+totH.toFixed(1)+'h total · Generated '+fmtDateLong(new Date().toISOString().slice(0,10))+'</p>'+
     '<table><thead><tr><th>Duty ID</th><th>Date</th><th>Type</th><th>Post</th><th>Time</th><th>Status</th><th>Troops</th></tr></thead><tbody>'+rowsHtml+'</tbody></table>'+
     '</body></html>');
@@ -7286,12 +7302,15 @@ function printSoldierDutyLookup(){
 }
 // Shift Details print (item 7) — one specific date+shift's full detail:
 // every duty entry in it, who's assigned, and which posts are covered.
-function printShiftDetails(dateISO,shiftKey){
+function printShiftDetails(dateISO,shiftKey,part){
   var list=D.duties.filter(function(d){return !d.cancelled&&dutyDisplayDate(d)===dateISO&&(isDayTime(d.startTime)?'day':'night')===shiftKey;}).sort(function(a,b){
     var oa=dutyPostSortIndex(a.postName), ob=dutyPostSortIndex(b.postName);
     if(oa!==ob) return oa-ob;
     return nightAwareMin(a.startTime,shiftKey)-nightAwareMin(b.startTime,shiftKey);
   });
+  if(!part){ dutySplitPrint(function(p){printShiftDetails(dateISO,shiftKey,p);},list.some(isRoamingDuty)); return; }
+  list=list.filter(function(d){return isRoamingDuty(d)===(part==='roaming');});
+  var rt=part==='roaming'?'RESTRICTED · ROAMING — ':'';
   var totH=list.reduce(function(s,d){return s+(parseFloat(d.durationHours)||0);},0);
   var allTroops={}; list.forEach(function(d){(d.troops||[]).forEach(function(tid){allTroops[tid]=true;});});
   var posts=[],seenP={}; list.forEach(function(d){ if(d.postName&&!seenP[d.postName]){seenP[d.postName]=1;posts.push(d.postName);} });
@@ -7307,7 +7326,7 @@ function printShiftDetails(dateISO,shiftKey){
   var body='<div class="info-grid"><div class="info-box"><div class="info-num">'+list.length+'</div><div class="info-lbl">Duty Entries</div></div><div class="info-box"><div class="info-num">'+totH.toFixed(1)+'</div><div class="info-lbl">Total Hours</div></div><div class="info-box"><div class="info-num">'+Object.keys(allTroops).length+'</div><div class="info-lbl">Troops Assigned</div></div><div class="info-box"><div class="info-num">'+posts.length+'</div><div class="info-lbl">Posts Covered</div></div></div>'+
     '<div class="sub-hdr">Entries — Grouped by Post</div><table><thead><tr><th>Duty ID</th><th>Type</th><th>Timing</th><th>Troops</th></tr></thead><tbody>'+rowsHtml+'</tbody></table>';
   var subtitle='<p style="font-size:15px;font-weight:900;color:#5a0f1a;">'+fmtDateLong(dateISO)+'</p>';
-  dutyReportWindow('SHIFT DETAILS — '+(shiftKey==='day'?'☀ DAY SHIFT':'🌙 NIGHT SHIFT'),subtitle,body);
+  dutyReportWindow(rt+'SHIFT DETAILS — '+(shiftKey==='day'?'☀ DAY SHIFT':'🌙 NIGHT SHIFT'),subtitle,body);
 }
 // Returns a sort rank for a duty/draft entry's post, following the order
 // posts are configured in (Sentry Posts settings) so printed rosters group
@@ -7353,7 +7372,7 @@ function dutyReportWindow(title,subtitleHtml,bodyHtml){
 // Duty Roster print (item 7) — respects whatever the page's own filters
 // (search, type, post, shift, range) are currently set to, so what's
 // printed matches what's on screen.
-function printDutyRoster(){
+function printDutyRoster(part){
   var postF=document.getElementById('duty-filter-post').value;
   var typeF=document.getElementById('duty-filter-type').value;
   var rangeF=document.getElementById('duty-filter-range').value;
@@ -7375,6 +7394,9 @@ function printDutyRoster(){
     }
     return true;
   }).sort(function(a,b){ var la=dutyDisplayDate(a),lb=dutyDisplayDate(b); return rangeF==='past'?lb.localeCompare(la):la.localeCompare(lb); });
+  if(!part){ dutySplitPrint(function(p){printDutyRoster(p);},list.some(isRoamingDuty)); return; }
+  list=list.filter(function(d){return isRoamingDuty(d)===(part==='roaming');});
+  var rt=part==='roaming'?'RESTRICTED · ROAMING — ':'';
   var totH=list.reduce(function(s,d){return s+(parseFloat(d.durationHours)||0);},0);
   var rowsHtml=list.length===0?'<tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">No duty entries match the current filters.</td></tr>':
     dutyGroupByShift(list).map(function(grp){
@@ -7383,11 +7405,11 @@ function printDutyRoster(){
         grp.duties.map(function(d){ return '<tr><td>'+(d.dutyId||'—')+'</td><td></td><td>'+escHtml(d.type)+'</td><td>'+escHtml(d.postName||'—')+'</td><td>'+(d.startTime||'')+'–'+shiftEndTime(d.startTime,d.durationHours)+'</td><td>'+(d.durationHours||'—')+'h</td><td style="font-size:11px;">'+(sortTroops((d.troops||[]).map(troopById).filter(Boolean)).map(function(t){return upLabel(t.rank,t.name);}).join(', ')||'—')+'</td></tr>'; }).join('');
     }).join('');
   var subtitle='<p>'+list.length+' duty entries · '+totH.toFixed(1)+'h total'+(q||typeF||postF||shiftF||rangeF!=='upcoming'?' (filtered)':'')+'</p>';
-  dutyReportWindow('DUTY ROSTER',subtitle,'<table><thead><tr><th>Duty ID</th><th>Date</th><th>Type</th><th>Post</th><th>Timing</th><th>Duration</th><th>Troops</th></tr></thead><tbody>'+rowsHtml+'</tbody></table>');
+  dutyReportWindow(rt+'DUTY ROSTER',subtitle,'<table><thead><tr><th>Duty ID</th><th>Date</th><th>Type</th><th>Post</th><th>Timing</th><th>Duration</th><th>Troops</th></tr></thead><tbody>'+rowsHtml+'</tbody></table>');
 }
 // Daily Duty List (item 7) — every duty for one specific date, both
 // shifts, grouped the same way as the roster above.
-function printDailyDutyList(dateISO){
+function printDailyDutyList(dateISO,part){
   dateISO=dateISO||new Date().toISOString().slice(0,10);
   var list=D.duties.filter(function(d){return !d.cancelled&&dutyDisplayDate(d)===dateISO;}).sort(function(a,b){
     var da=isDayTime(a.startTime)?'day':'night', db=isDayTime(b.startTime)?'day':'night';
@@ -7396,11 +7418,14 @@ function printDailyDutyList(dateISO){
     if(pa!==pb) return pa-pb;
     return nightAwareMin(a.startTime,da)-nightAwareMin(b.startTime,db);
   });
+  if(!part){ dutySplitPrint(function(p){printDailyDutyList(dateISO,p);},list.some(isRoamingDuty)); return; }
+  list=list.filter(function(d){return isRoamingDuty(d)===(part==='roaming');});
+  var rt=part==='roaming'?'RESTRICTED · ROAMING — ':'';
   var totH=list.reduce(function(s,d){return s+(parseFloat(d.durationHours)||0);},0);
   var rowsHtml=list.length===0?'<tr><td colspan="6" style="text-align:center;color:#888;padding:20px;">No duty entries on this date.</td></tr>':
     list.map(function(d){ return '<tr><td>'+(d.dutyId||'—')+'</td><td>'+(isDayTime(d.startTime)?'☀ Day':'🌙 Night')+'</td><td>'+escHtml(d.type)+'</td><td>'+escHtml(d.postName||'—')+'</td><td>'+(d.startTime||'')+'–'+shiftEndTime(d.startTime,d.durationHours)+' ('+(d.durationHours||'—')+'h)</td><td style="font-size:11px;">'+(sortTroops((d.troops||[]).map(troopById).filter(Boolean)).map(function(t){return upLabel(t.rank,t.name);}).join(', ')||'—')+'</td></tr>'; }).join('');
   var subtitle='<p style="font-size:15px;font-weight:900;color:#5a0f1a;">'+fmtDateLong(dateISO)+'</p><p>'+list.length+' duty entries · '+totH.toFixed(1)+'h total</p>';
-  dutyReportWindow('DAILY DUTY LIST',subtitle,'<table><thead><tr><th>Duty ID</th><th>Shift</th><th>Type</th><th>Post</th><th>Timing</th><th>Troops</th></tr></thead><tbody>'+rowsHtml+'</tbody></table>');
+  dutyReportWindow(rt+'DAILY DUTY LIST',subtitle,'<table><thead><tr><th>Duty ID</th><th>Shift</th><th>Type</th><th>Post</th><th>Timing</th><th>Troops</th></tr></thead><tbody>'+rowsHtml+'</tbody></table>');
 }
 // Sentry Assignments (item 7) — who's covering which post, grouped by
 // post rather than by date/shift, for upcoming & today by default.
