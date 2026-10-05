@@ -3252,6 +3252,16 @@ function migrateDutySystem(){
   D.config.dutyTypes=D.config.dutyTypes.map(function(t){
     return {id:t.id||uid('dt'),name:t.name||'Duty',defaultDuration:(t.defaultDuration!=null?t.defaultDuration:1),dayDuration:(t.dayDuration!=null?t.dayDuration:null),nightDuration:(t.nightDuration!=null?t.nightDuration:null),defaultStart:t.defaultStart||'',requiresPost:!!t.requiresPost,qualRequired:t.qualRequired||'',eligibility:t.eligibility||'all',roamingShiftCount:(t.roamingShiftCount!=null?t.roamingShiftCount:8),roamingOfficerEnabled:(t.roamingOfficerEnabled!=null?t.roamingOfficerEnabled:true)};
   });
+  // Safety net: Suggest Duty only builds Roaming / Line Duty slots when a
+  // duty type with that name exists. If it was deleted or renamed in saved
+  // data, put the default back so those rows never silently disappear.
+  ['Roaming','Line Duty'].forEach(function(nm){
+    var has=D.config.dutyTypes.some(function(t){return String(t.name||'').trim().toLowerCase()===nm.toLowerCase();});
+    if(!has){
+      var def=DEFAULT_DUTY_TYPES.find(function(t){return t.name===nm;});
+      if(def) D.config.dutyTypes.push(Object.assign({roamingShiftCount:8,roamingOfficerEnabled:true},def));
+    }
+  });
   if(!D.config.roamingRotation) D.config.roamingRotation={officerIdx:-1,jcoIdx:-1};
   if(!D.config.dayNight) D.config.dayNight=Object.assign({},DEFAULT_DAY_NIGHT);
   if(!D.config.dayNight.start) D.config.dayNight.start=DEFAULT_DAY_NIGHT.start;
@@ -8391,7 +8401,10 @@ function dutyFairnessScore(t){
   }
   return dutyParticipationPct(t)*10-daysSinceCapped(lastDutyDate(t.id),t);
 }
-function dutyTypeByName(name){ return (D.config.dutyTypes||[]).find(function(x){return x.name===name;})||null; }
+function dutyTypeByName(name){
+  var want=String(name||'').trim().toLowerCase();
+  return (D.config.dutyTypes||[]).find(function(x){return String(x.name||'').trim().toLowerCase()===want;})||null;
+}
 function dutyPostById(id){ return (D.config.dutyPosts||[]).find(function(x){return x.id===id;})||null; }
 function isAdminTrade(t){ return t&&(t.trade==='Administration'||t.trade==='POB Commander'||t.dualAdmin); }
 // Same idea as isAdminTrade, but WITHOUT dual-role troops — used only for
