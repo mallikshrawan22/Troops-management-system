@@ -508,6 +508,13 @@ async function migrateSchema() {
         }
       }
     }
+    // The one-time cutovers above only copy when their new table is EMPTY.
+    // The old app_config blobs were never removed, so any time a table
+    // became empty again (e.g. the LAST draft was deleted) the next server
+    // restart re-copied the stale blob and the deleted draft/duty/group
+    // came back. By this point every cutover has already run, so the
+    // legacy blobs are dead data -- remove them so nothing can resurrect.
+    await pool.query(`DELETE FROM app_config WHERE key IN ('duties','drafts','dutyDrafts','dutyContingency')`);
     // Device sessions (multi-device sign-in/sign-out) — each device that
     // logs in with the shared master key gets its own row here and its own
     // token, so any device can be individually or collectively signed out

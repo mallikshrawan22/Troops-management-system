@@ -9726,7 +9726,11 @@ function renderDash(){
   // ── ALERTS ──────────────────────────────────────────────────────────
   var alerts='';
   if(wkPats.length===0) alerts+='<div class="alert al-warn" style="margin-bottom:14px;">⚠ No patrol logged this week.</div>';
+  // A backup is a download made ON THIS DEVICE, so its date is tracked per-device
+  // in localStorage. The synced settings copy can be overwritten by a stale
+  // copy from another device or an older server save, so use whichever is newer.
   var lastBk=D.settings.lastBackupDate;
+  try{ var _lb=localStorage.getItem('tms_last_backup_local'); if(_lb&&(!lastBk||_lb>lastBk)) lastBk=_lb; }catch(e){}
   var bkDays=lastBk?daysSince(lastBk.slice(0,10)):null;
   if(!lastBk||bkDays>=7){
     var bkMsg=lastBk?('Last backup was '+bkDays+' day'+(bkDays===1?'':'s')+' ago.'):'No backup has been made yet.';
@@ -11331,7 +11335,7 @@ function printHandover(){
 // =====================================================================
 // BACKUP & RESTORE
 // =====================================================================
-function doExport(){ var backup={version:4,exportDate:new Date().toISOString(),exportedBy:(D.settings.pob?D.settings.pob+' ':'')+'Troops Management System Mobile',data:D}; var fnPrefix=(D.settings.pob||'').trim().replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,''); dlFile(JSON.stringify(backup,null,2),'application/json',(fnPrefix?fnPrefix+'_':'')+'Backup_'+new Date().toISOString().slice(0,10)+'.json'); D.settings.lastBackupDate=new Date().toISOString(); saveData(); remoteSaveConfig(); audit('Full backup exported'); if(document.getElementById('dash-alerts')) renderDash(); }
+function doExport(){ var backup={version:4,exportDate:new Date().toISOString(),exportedBy:(D.settings.pob?D.settings.pob+' ':'')+'Troops Management System Mobile',data:D}; var fnPrefix=(D.settings.pob||'').trim().replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,''); dlFile(JSON.stringify(backup,null,2),'application/json',(fnPrefix?fnPrefix+'_':'')+'Backup_'+new Date().toISOString().slice(0,10)+'.json'); D.settings.lastBackupDate=new Date().toISOString(); try{localStorage.setItem('tms_last_backup_local',D.settings.lastBackupDate);}catch(e){} saveData(); remoteSaveConfig(); audit('Full backup exported'); if(document.getElementById('dash-alerts')) renderDash(); }
 function dlFile(content,type,filename){ var blob=new Blob([content],{type:type}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a);a.click(); document.body.removeChild(a);URL.revokeObjectURL(a.href); }
 var pendingRestore=null;
 function previewRestore(input){ var file=input.files[0]; if(!file) return; var reader=new FileReader(); reader.onload=function(e){ try{var backup=JSON.parse(e.target.result);if(!backup.data) throw new Error('Invalid');pendingRestore=backup;var d=backup.data;var prev=document.getElementById('restore-preview');prev.style.display='';prev.className='alert al-info';prev.innerHTML='Valid backup: <strong>'+(backup.exportDate?backup.exportDate.slice(0,10):'?')+'</strong><br>Troops: <strong>'+(d.troops||[]).length+'</strong> · Archived: <strong>'+(d.archived||[]).length+'</strong> · Patrols: <strong>'+(d.patrols||[]).length+'</strong><br><strong style="color:#ff9999;">This will overwrite all current data.</strong>';document.getElementById('restore-btn').style.display='';document.getElementById('restore-cancel').style.display='';}catch(err){var prev=document.getElementById('restore-preview');prev.style.display='';prev.className='alert al-danger';prev.innerHTML='Invalid backup file.';document.getElementById('restore-btn').style.display='none';document.getElementById('restore-cancel').style.display='none';} }; reader.readAsText(file); }
