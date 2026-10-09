@@ -1603,7 +1603,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
   <div class="card">
     <div class="card-title">Patrol Rest Days</div>
     <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">Minimum number of days a troop must rest before being suggested for another patrol. Set to 0 to disable — troops can then be picked for a patrol the very next day.</p>
-    <div class="fg" style="max-width:220px;"><label class="field-label">Min Rest Days Between Patrols</label><input type="number" id="cfg-min-patrol-rest" min="0" max="30" onchange="saveMinPatrolRestDays()"></div>
+    <div class="fg" style="max-width:220px;"><label class="field-label">Min Rest Days Between Patrols</label><input type="number" id="cfg-min-patrol-rest" min="0" max="30" onchange="saveMinPatrolRestDays()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Counted in <strong>patrol days</strong>, not calendar days: days with no patrol don't count, and all patrols on one date count as one. With 1, a troop who patrolled Monday (none Tuesday, a patrol Wednesday) is free again Thursday. 0 = off.</div></div>
   </div>
   <div class="card">
     <div class="card-title">Patrol Types</div>
@@ -4396,6 +4396,28 @@ function stmToggleOfficer(){
 }
 function backToStmConfig(){ document.getElementById('stm-config').style.display=''; document.getElementById('stm-results').style.display='none'; _stmManualPickSlot=-1; var rp=document.getElementById('stm-remaining-troops'); if(rp) rp.style.display='none'; }
 
+// Patrol-day gap: for each troop, how many PATROL DAYS (calendar dates on
+// which at least one patrol was logged — several patrols on one date count
+// as one) fall strictly between their last patrol date and the planned
+// patrol date. Days with no patrol don't count. Never-patrolled = 9999.
+// e.g. Mon patrol (A,B), Tue none, Wed patrol (C): planning Thu gives A,B
+// a gap of 1 (Wed); planning Wed gives them 0 (nothing in between yet).
+function stmPatrolGapMap(refDate){
+  var dates={}, lastBy={};
+  D.patrols.forEach(function(p){
+    if(!p.date||p.date>refDate) return;
+    dates[p.date]=true;
+    (p.troops||[]).forEach(function(id){ if(!lastBy[id]||p.date>lastBy[id]) lastBy[id]=p.date; });
+  });
+  var dateList=Object.keys(dates);
+  var map={};
+  D.troops.forEach(function(t){
+    var l=lastBy[t.id];
+    map[t.id]=l?dateList.filter(function(d){ return d>l&&d<refDate; }).length:9999;
+  });
+  return map;
+}
+
 function stmDutyPctMap(refDate){
   // Same formula as the Participation page: a troop's patrol hours since
   // their own effective deployment date, divided by total unit patrol
@@ -4459,8 +4481,8 @@ function generateSuggestion(){
   // below via stmAdmitAdmin when they're more overdue than that pool's
   // most-overdue normal troop.
   var adminCandidates=stmAdminCandidates(excludeRestricted,patrolDate);
-  // Minimum rest days: a troop resting less than this many days since their
-  // last patrol is pushed to the bottom of every pool they're ranked in,
+  // Minimum rest (in PATROL DAYS, see stmPatrolGapMap): a troop with fewer
+  // than this many patrol days since their last patrol is pushed to the bottom of every pool they're ranked in,
   // rather than being excluded outright. This means take() only reaches a
   // still-resting troop once every rested candidate in that pool/role has
   // already been used — an automatic, per-role "last resort" relaxation, so
@@ -4468,7 +4490,8 @@ function generateSuggestion(){
   // resting. Any troop who does get pulled in this way is flagged in
   // stmRestWarnings() below so it's never silent.
   var minRestDays=(D.config.minPatrolRestDays!=null)?D.config.minPatrolRestDays:DEFAULT_MIN_PATROL_REST_DAYS;
-  function isRested(id){ return !minRestDays || daysSince(lastPatrol(id),patrolDate)>=minRestDays; }
+  var patrolGap=stmPatrolGapMap(patrolDate);
+  function isRested(id){ return !minRestDays || (patrolGap[id]!=null?patrolGap[id]:9999)>=minRestDays; }
   // Category-based rotation: lowest duty % first. Ties broken by longest
   // time since last patrol, then name, for a stable, explainable order.
   // Rested troops are ranked ahead of still-resting ones (see isRested).
@@ -4476,7 +4499,7 @@ function generateSuggestion(){
     function byFairness(a,b){
       var d=dutyPct[a.id]-dutyPct[b.id];
       if(d!==0) return d;
-      var ds=daysSince(lastPatrol(b.id),patrolDate)-daysSince(lastPatrol(a.id),patrolDate);
+      var ds=(patrolGap[b.id]!=null?patrolGap[b.id]:9999)-(patrolGap[a.id]!=null?patrolGap[a.id]:9999);
       if(ds!==0) return ds;
       return (a.name||'').localeCompare(b.name||'');
     }
@@ -4757,10 +4780,10 @@ function generateSuggestion(){
   if(minRestDays){
     slots.forEach(function(s){
       if(!s.chosenId) return;
-      var d=daysSince(lastPatrol(s.chosenId),patrolDate);
+      var d=patrolGap[s.chosenId]!=null?patrolGap[s.chosenId]:9999;
       if(d<minRestDays){
         var t=troopById(s.chosenId);
-        warnings.push('⏱ '+t.rank.toUpperCase()+' '+t.name.toUpperCase()+' patrolled '+d+' day(s) ago — below the '+minRestDays+'-day minimum rest, but no rested alternative was left for '+s.role+'.');
+        warnings.push('⏱ '+t.rank.toUpperCase()+' '+t.name.toUpperCase()+' — only '+d+' patrol day(s) since their last patrol, below the '+minRestDays+'-patrol-day minimum gap, but no rested alternative was left for '+s.role+'.');
       }
     });
   }
@@ -9035,7 +9058,7 @@ function saveMinPatrolRestDays(){
   D.config.minPatrolRestDays=v;
   document.getElementById('cfg-min-patrol-rest').value=v;
   remoteSaveConfig();
-  audit('Minimum rest days between patrols updated: '+v);
+  audit('Minimum rest (patrol days) between patrols updated: '+v);
 }
 function saveDriverDutyQuota(){
   function readVal(id){ var v=parseInt(document.getElementById(id).value); return (isNaN(v)||v<0)?0:v; }
