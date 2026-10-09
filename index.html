@@ -1602,8 +1602,8 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
   </div>
   <div class="card">
     <div class="card-title">Patrol Rest Days</div>
-    <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">Minimum number of days a troop must rest before being suggested for another patrol. Set to 0 to disable — troops can then be picked for a patrol the very next day.</p>
-    <div class="fg" style="max-width:220px;"><label class="field-label">Min Rest Days Between Patrols</label><input type="number" id="cfg-min-patrol-rest" min="0" max="30" onchange="saveMinPatrolRestDays()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Counted in <strong>patrol days</strong>, not calendar days: days with no patrol don't count, and all patrols on one date count as one. With 1, a troop who patrolled Monday (none Tuesday, a patrol Wednesday) is free again Thursday. 0 = off.</div></div>
+    <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">Minimum number of <strong>patrol days</strong> a troop must rest before being suggested for another patrol. A patrol day is any date on which at least one patrol went out — days with no patrol don't count. Set to 0 to disable — troops can then be picked for the very next patrol.</p>
+    <div class="fg" style="max-width:220px;"><label class="field-label">Min Rest (Patrol Days) Between Patrols</label><input type="number" id="cfg-min-patrol-rest" min="0" max="30" onchange="saveMinPatrolRestDays()"><div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Counted in <strong>patrol days</strong>, not calendar days: days with no patrol don't count, and all patrols on one date count as one. With 1, a troop who patrolled Monday (none Tuesday, a patrol Wednesday) is free again Thursday. 0 = off.</div></div>
   </div>
   <div class="card">
     <div class="card-title">Patrol Types</div>
