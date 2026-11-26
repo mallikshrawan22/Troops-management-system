@@ -2938,6 +2938,7 @@ details.guide-item[open] summary{border-bottom:1px solid var(--border);}
     </div>
     <div id="devices-note" style="padding:4px 2px 10px;font-size:12.5px;color:var(--text-muted);">Every device signed in to this app. Deactivating a device signs it out immediately — it can sign back in anytime with the master key.</div>
     <button class="btn btn-ghost btn-full" id="devices-claim-main-btn" style="margin-bottom:10px;display:none;" onclick="claimMainDevice()">⭐ Claim Main Device</button>
+    <button class="btn btn-ghost btn-full" id="devices-take-main-btn" style="margin-bottom:10px;display:none;" onclick="takeMainWithKey()">👑 Make THIS Device Main (needs master key)</button>
     <button class="btn btn-danger btn-full" id="devices-deactivate-all-btn" style="margin-bottom:10px;" onclick="revokeOtherDevices()">🚫 Deactivate All Other Devices</button>
     <div id="devices-list" style="max-height:55vh;overflow-y:auto;"></div>
   </div>
@@ -2967,6 +2968,21 @@ var SESS_KEY = 'pob_session_v1';
 function getSession(){ try{ var r=localStorage.getItem(SESS_KEY); return r?JSON.parse(r):null; }catch(e){ return null; } }
 function saveSession(token,sessionId,deviceLabel,isMain){ localStorage.setItem(SESS_KEY,JSON.stringify({token:token,sessionId:sessionId,deviceLabel:deviceLabel,isMain:!!isMain})); }
 function clearSession(){ localStorage.removeItem(SESS_KEY); }
+// Stable random ID for THIS browser install. Deliberately kept separate from
+// the session (never removed by clearSession/wipeLocalData) so that when this
+// same device signs in again, the server can recognise it, retire its old
+// session, and hand MAIN over instead of leaving a duplicate "ghost" device.
+var DEVICE_ID_KEY = 'pob_device_id_v1';
+function getDeviceId(){
+  try{
+    var id=localStorage.getItem(DEVICE_ID_KEY);
+    if(!id){
+      id='dev_'+Date.now().toString(36)+Math.random().toString(36).slice(2,10)+Math.random().toString(36).slice(2,10);
+      localStorage.setItem(DEVICE_ID_KEY,id);
+    }
+    return id;
+  }catch(e){ return ''; }
+}
 // True remote "uninstall" — removing the app icon itself from another
 // device's home screen — isn't something any web app or PWA can trigger;
 // that's an OS-level action only the person holding the device can do.
@@ -3012,7 +3028,7 @@ function submitLogin(){
   if(!key){ errEl.textContent='Enter the master key.'; return; }
   var btn=document.getElementById('login-submit-btn');
   if(btn){ btn.disabled=true; btn.textContent='Signing in…'; }
-  fetch(API_URL+'/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceLabel:label,masterKey:key})})
+  fetch(API_URL+'/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceLabel:label,masterKey:key,deviceId:getDeviceId()})})
     .then(function(r){ return r.json().then(function(data){ if(!r.ok){ var e=new Error((data&&data.error)||'Login failed'); e.data=data; throw e; } return data; }); })
     .then(function(data){
       saveSession(data.token,data.sessionId,data.deviceLabel,data.isMain);
@@ -3036,7 +3052,7 @@ function submitEmergencyTakeover(){
   if(!confirm('This will make "'+label+'" the new main device and immediately sign out whichever device currently holds that role. Continue?')) return;
   var btn=document.getElementById('emergency-takeover-btn');
   if(btn){ btn.disabled=true; btn.textContent='Taking over…'; }
-  fetch(API_URL+'/emergency-takeover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceLabel:label,masterKey:key})})
+  fetch(API_URL+'/emergency-takeover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceLabel:label,masterKey:key,deviceId:getDeviceId()})})
     .then(function(r){ return r.json().then(function(data){ if(!r.ok){ var e=new Error((data&&data.error)||'Takeover failed'); e.data=data; throw e; } return data; }); })
     .then(function(data){
       saveSession(data.token,data.sessionId,data.deviceLabel,data.isMain);
@@ -3085,6 +3101,8 @@ function openDevicesModal(){
     if(allBtn) allBtn.style.display=iAmMain?'':'none';
     var claimBtn=document.getElementById('devices-claim-main-btn');
     if(claimBtn) claimBtn.style.display=(!iAmMain&&noActiveMain)?'':'none';
+    var takeBtn=document.getElementById('devices-take-main-btn');
+    if(takeBtn) takeBtn.style.display=(!iAmMain&&!noActiveMain)?'':'none';
     if(rows.length===0){ document.getElementById('devices-list').innerHTML='<div class="empty">No devices found.</div>'; return; }
     function rowHtml(r){
       var actions='';
@@ -3134,11 +3152,19 @@ function claimMainDevice(){
     openDevicesModal();
   }).catch(function(e){ alert((e&&e.data&&e.data.error)||'Could not claim main device. A main device may already be active — refresh and try again.'); });
 }
+function takeMainWithKey(){
+  var key=prompt('Enter the master key to make THIS device the main device.\n\nWhichever device is main now will be deactivated (it can sign back in with the master key).');
+  if(!key) return;
+  apiFetch('/sessions/take-main',{method:'POST',body:JSON.stringify({masterKey:key.trim()})}).then(function(){
+    var s=getSession(); if(s){ s.isMain=true; localStorage.setItem(SESS_KEY,JSON.stringify(s)); }
+    openDevicesModal();
+  }).catch(function(e){ alert((e&&e.data&&e.data.error)||'Could not take over main. Check the master key and try again.'); });
+}
 function clearDeactivatedDevices(){
   if(!confirm('Permanently remove all deactivated devices from this list? This cannot be undone, but none of them can sign back in without the master key anyway.')) return;
   apiFetch('/sessions/revoked',{method:'DELETE'}).then(function(){ openDevicesModal(); }).catch(function(e){ alert((e&&e.data&&e.data.error)||'Could not clear deactivated devices. Try again.'); });
 }
-var APP_VERSION = '2026.07.03.1';
+var APP_VERSION = '2026.11.26.1';
 var SK = 'pob_v4';
 var DEFAULT_RANKS = ['Major','Captain','WO','WO1','WO2','CSM','Sergeant','Corporal','Lance Corporal','Private','NCE'];
 var DEFAULT_ROUTES = ['Main Gate - Market - Base','River Crossing - Perimeter','Airport Road - Town Center','North Perimeter - South Gate'];
@@ -3354,7 +3380,8 @@ function renderFailedWritesList(){
   var el=document.getElementById('failed-writes-list');
   var list=loadFailed();
   if(list.length===0){ el.innerHTML='<div style="padding:24px 4px;text-align:center;color:var(--text-muted);font-size:13.5px;">Nothing pending — every change has been saved.</div>'; return; }
-  el.innerHTML=list.slice().reverse().map(function(f){
+  var retryAllHtml=list.length>1?'<div style="padding:4px 0 10px;"><button class="btn btn-primary btn-full" onclick="retryAllFailedWrites()">🔁 Retry All ('+list.length+')</button></div>':'';
+  el.innerHTML=retryAllHtml+list.slice().reverse().map(function(f){
     var d=new Date(f.ts);
     var ts=String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
     return '<div style="padding:12px 0;border-bottom:1px solid var(--border);">'+
@@ -3381,6 +3408,27 @@ function retryFailedWrite(id){
     renderFailedWritesList();
     showFailureAlert('Retry failed again: '+f.error);
   });
+}
+function retryAllFailedWrites(){
+  var list=loadFailed().slice(), i=0;
+  function next(){
+    if(i>=list.length){ renderFailedWritesList(); manualSync(); return; }
+    var f=list[i++];
+    replayOp(f).then(function(){
+      saveFailed(loadFailed().filter(function(x){return x.id!==f.id;}));
+      next();
+    }).catch(function(e){
+      var cur=loadFailed(), t=cur.find(function(x){return x.id===f.id;});
+      if(t){ t.error=(e&&e.data&&e.data.error)||e.message||'Rejected by server'; t.ts=Date.now(); saveFailed(cur); }
+      if(e&&(e.status===429||e.isTimeout||!e.status)){
+        renderFailedWritesList();
+        showFailureAlert('Server busy or offline — wait a minute, then tap Retry All again.');
+        return;
+      }
+      next();
+    });
+  }
+  next();
 }
 function discardFailedWrite(id){
   if(!confirm('Permanently give up on this change? It will NOT be saved to the server.')) return;
@@ -3447,7 +3495,7 @@ function flushOutbox(){
     // before pulling the server's copy over local state -- which is what
     // made logged duties vanish on sync. Only a true 4xx data/validation
     // rejection (400, 404, 413, 422, etc.) should ever leave the retry queue.
-    if(e && e.status && e.status!==401 && e.status>=400 && e.status<500){
+    if(e && e.status && e.status!==401 && e.status!==408 && e.status!==429 && e.status>=400 && e.status<500){
       // A genuine rejection (bad data) — retrying the exact same payload
       // forever would never succeed and would block every future sync item
       // behind it. Move it out of the retry queue and into the reviewable
@@ -3799,7 +3847,7 @@ function _trackWrite(promise){
 // the moment it happens, instead of being invisible until a future sync.
 function handleWriteFailure(kind,payload,e){
   console.error(kind+' failed',e);
-  if(e && e.status && e.status!==401 && e.status>=400 && e.status<500){
+  if(e && e.status && e.status!==401 && e.status!==408 && e.status!==429 && e.status>=400 && e.status<500){
     addFailed(kind,payload,(e&&e.data&&e.data.error)||e.message||('Server rejected with status '+e.status));
   } else {
     queueOp(kind,payload);
@@ -3845,7 +3893,17 @@ function remoteDeletePatrol(id){ saveData(); return _trackWrite(apiFetch('/patro
 // remoteSaveTroop/remoteSavePatrol: write local first, push to the
 // server, and queue it for retry if that fails/is offline.
 function remoteSaveDuty(d){ saveData(); var body={id:d.id,dutySeq:d.dutySeq,date:d.date,logicalDate:d.logicalDate,type:d.type,postId:d.postId,postName:d.postName,startTime:d.startTime,durationHours:d.durationHours,troops:d.troops,remarks:d.remarks,adminOverride:d.adminOverride,replacements:d.replacements,createdAt:d.createdAt,modifiedAt:d.modifiedAt,cancelled:d.cancelled,cancelledAt:d.cancelledAt||null,shiftIdx:d.shiftIdx,shiftIdxCount:d.shiftIdxCount,dutyId:d.dutyId}; return _trackWrite(apiFetch('/duties',{method:'POST',body:JSON.stringify(body)}).catch(function(e){handleWriteFailure('saveDuty',body,e);})); }
-function remoteSaveDuties(list){ return Promise.all((list||[]).map(function(d){ return remoteSaveDuty(d); })); }
+// Sends at most 4 saves at a time. A roster can contain dozens of duty records;
+// firing them all at once used to burst past the server's rate limit.
+function remoteSaveDuties(list){
+  var items=(list||[]).slice(), results=[];
+  function worker(){
+    if(items.length===0) return Promise.resolve();
+    var d=items.shift();
+    return remoteSaveDuty(d).then(function(r){ results.push(r); return worker(); });
+  }
+  return Promise.all([worker(),worker(),worker(),worker()]).then(function(){ return results; });
+}
 function remoteDeleteDuty(id){ saveData(); return _trackWrite(apiFetch('/duties/'+id,{method:'DELETE'}).catch(function(e){handleWriteFailure('deleteDuty',{id:id},e);})); }
 // Patrol drafts now save one record at a time to their own endpoint
 // instead of riding along inside remoteSaveConfig's whole-array 'drafts'

@@ -37,19 +37,32 @@ app.use((req, res, next) => {
 // package needed — just an in-memory counter per IP address that resets
 // every minute. Not as strong as a dedicated service, but a real
 // deterrent for an app this size, and completely free.
-const RATE_LIMIT_MAX = 120;         // max requests allowed per IP per window
+// Two buckets: one per IP (generous, because a whole post/base often
+// shares ONE public IP through the same Wi-Fi/NAT, so several devices
+// syncing at once used to exhaust a tight per-IP limit and get saves
+// rejected with 429), and one per session token (so a single noisy device
+// can't starve the others).
+const RATE_LIMIT_MAX = 600;         // max requests allowed per IP per window
+const RATE_LIMIT_MAX_SESSION = 240; // max requests allowed per session token per window
 const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute window
 const _rateHits = new Map();
+function _hit(key, max, now) {
+  const entry = _rateHits.get(key);
+  if (!entry || now - entry.start > RATE_LIMIT_WINDOW_MS) {
+    _rateHits.set(key, { start: now, count: 1 });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= max;
+}
 function rateLimiter(req, res, next) {
   const ip = req.ip || 'unknown';
   const now = Date.now();
-  const entry = _rateHits.get(ip);
-  if (!entry || now - entry.start > RATE_LIMIT_WINDOW_MS) {
-    _rateHits.set(ip, { start: now, count: 1 });
-    return next();
-  }
-  entry.count++;
-  if (entry.count > RATE_LIMIT_MAX) {
+  let ok = _hit('ip:' + ip, RATE_LIMIT_MAX, now);
+  const tok = req.header('x-session-token');
+  if (ok && tok) ok = _hit('tok:' + String(tok).slice(0, 24), RATE_LIMIT_MAX_SESSION, now);
+  if (!ok) {
+    res.set('Retry-After', '30');
     return res.status(429).json({ error: 'Too many requests, slow down.' });
   }
   next();
@@ -187,10 +200,25 @@ app.post('/login', async (req, res) => {
     // status; it has to claim the (now-empty) seat via
     // POST /sessions/claim-main.
     const { rows: countRows } = await pool.query('SELECT COUNT(*)::int AS c FROM sessions');
-    const isMain = countRows[0].c === 0;
+    let isMain = countRows[0].c === 0;
+    // Same physical device signing in again (e.g. after being signed out or
+    // having its storage cleared): the browser keeps a stable random
+    // deviceId, so retire that device's older session(s) instead of leaving
+    // a duplicate "ghost" row, and let the new session inherit MAIN if the
+    // old one held it.
+    const deviceId = clip((req.body && req.body.deviceId) || '', 64) || null;
+    if (deviceId) {
+      const { rows: old } = await pool.query(
+        'SELECT id, is_main FROM sessions WHERE device_id = $1 AND revoked = FALSE', [deviceId]
+      );
+      if (old.length) {
+        if (old.some(r => r.is_main)) isMain = true;
+        await pool.query('UPDATE sessions SET revoked = TRUE, is_main = FALSE WHERE device_id = $1 AND revoked = FALSE', [deviceId]);
+      }
+    }
     await pool.query(
-      'INSERT INTO sessions (id, token, device_label, is_main) VALUES ($1, $2, $3, $4)',
-      [id, token, deviceLabel, isMain]
+      'INSERT INTO sessions (id, token, device_label, is_main, device_id) VALUES ($1, $2, $3, $4, $5)',
+      [id, token, deviceLabel, isMain, deviceId]
     );
     res.json({ token, sessionId: id, deviceLabel, isMain });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
@@ -244,7 +272,9 @@ app.post('/emergency-takeover', async (req, res) => {
     const id = genSessionId();
     const token = genToken();
     const { rows: prevMainRows } = await pool.query('SELECT id, device_label FROM sessions WHERE is_main = TRUE');
-    await pool.query('INSERT INTO sessions (id, token, device_label, is_main) VALUES ($1, $2, $3, TRUE)', [id, token, deviceLabel]);
+    const takeDeviceId = clip((req.body && req.body.deviceId) || '', 64) || null;
+    await pool.query('INSERT INTO sessions (id, token, device_label, is_main, device_id) VALUES ($1, $2, $3, TRUE, $4)', [id, token, deviceLabel, takeDeviceId]);
+    if (takeDeviceId) await pool.query('UPDATE sessions SET revoked = TRUE, is_main = FALSE WHERE device_id = $1 AND id != $2 AND revoked = FALSE', [takeDeviceId, id]);
     await pool.query('UPDATE sessions SET is_main = FALSE, revoked = TRUE WHERE id != $1 AND is_main = TRUE', [id]);
     const prevLabel = prevMainRows.length ? prevMainRows[0].device_label : '(none)';
     await pool.query(
@@ -533,6 +563,7 @@ async function migrateSchema() {
     // the "main device" concept: add the column without touching
     // existing rows (they stay FALSE until claimed — see /sessions/claim-main).
     await pool.query('ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_main BOOLEAN NOT NULL DEFAULT FALSE');
+    await pool.query('ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device_id TEXT');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)');
     console.log('Schema check OK: blood_group, deployment_date, weapon_number, gender, category, trade, driver_quals, target_pct, never_suggest, restricted_range, duty_quals, is_senior_sergeant, never_duty, status_since, excluded_days, absences, ptl_seq, sessions table present.');
   } catch (e) {
@@ -542,7 +573,7 @@ async function migrateSchema() {
 
 // ── VERSION (bump this string on every backend deploy) ─────────────────
 // Left open — reveals nothing about your data.
-const API_VERSION = '2026.09.19.2-duty-drafts-contingency-fix';
+const API_VERSION = '2026.11.26.1-device-dedupe-take-main-ratelimit';
 app.get('/version', (_, res) => res.json({ version: API_VERSION }));
 
 // ── HEALTH ────────────────────────────────────────────────────────────
@@ -652,6 +683,45 @@ app.post('/sessions/claim-main', async (req, res) => {
       return res.status(403).json({ error: 'A main device is already active.' });
     }
     await pool.query('UPDATE sessions SET is_main = TRUE WHERE id = $1', [req.sessionId]);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
+});
+
+// Take main status from inside the app. For when the MAIN seat is held by a
+// stale/ghost session (e.g. this same phone signed out and back in, so the old
+// session is still "active" on the server but nobody holds its token) — which
+// /sessions/claim-main refuses because a main "exists". Requires the master
+// key again (same throttling as /login) so a device that merely knows nothing
+// but is signed in can't grab main. The previous main session is deactivated,
+// and the change is written to the audit log.
+app.post('/sessions/take-main', async (req, res) => {
+  try {
+    const ip = req.ip || 'unknown';
+    const now = Date.now();
+    const blockEntry = _badKeyBlocks.get(ip);
+    if (blockEntry && now < blockEntry.until) {
+      return res.status(403).json({ error: 'Too many invalid attempts. Blocked temporarily.' });
+    }
+    const masterKey = (req.body && req.body.masterKey) || '';
+    if (!safeCompare(masterKey, API_KEY)) {
+      const rec = _badKeyFails.get(ip) || { count: 0, start: now };
+      if (now - rec.start > BAD_KEY_WINDOW_MS) { rec.count = 0; rec.start = now; }
+      rec.count++;
+      _badKeyFails.set(ip, rec);
+      if (rec.count >= BAD_KEY_MAX) {
+        _badKeyBlocks.set(ip, { until: now + BAD_KEY_BLOCK_MS });
+        _badKeyFails.delete(ip);
+      }
+      return res.status(401).json({ error: 'Incorrect master key.' });
+    }
+    const { rows: prev } = await pool.query('SELECT device_label FROM sessions WHERE is_main = TRUE AND id != $1', [req.sessionId]);
+    await pool.query('UPDATE sessions SET is_main = FALSE, revoked = TRUE WHERE is_main = TRUE AND id != $1', [req.sessionId]);
+    await pool.query('UPDATE sessions SET is_main = TRUE WHERE id = $1', [req.sessionId]);
+    const prevLabel = prev.length ? prev.map(r => r.device_label).join(', ') : '(none)';
+    await pool.query(
+      'INSERT INTO audit_log (ts, msg) VALUES ($1, $2)',
+      [new Date().toISOString(), clip(`Main device taken over in-app: this session became main, replacing "${prevLabel}", from IP ${ip}.`, 500)]
+    );
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error. Please try again.' }); }
 });
